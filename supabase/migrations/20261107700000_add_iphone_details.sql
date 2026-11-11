@@ -1,0 +1,41 @@
+-- Add comprehensive details to the iPhone 15 Pro Max product
+UPDATE public.products
+SET
+  name = 'iPhone 15 Pro Max 256GB',
+  brand = 'Apple',
+  model_number = 'A3104',
+  product_type = 'Smartphone',
+  description = 'iPhone 15 Pro Max with the A17 Pro chip, the first 3-nanometer chip in any smartphone. Features a 6.7-inch Super Retina XDR display with ProMotion (120Hz adaptive refresh rate) and Always-On display. The pro camera system includes a 48MP main camera with a new super-high-resolution 24MP default, a 12MP ultra-wide camera, and a 12MP 5x optical zoom telephoto camera — the longest optical zoom on iPhone ever. Titanium design with a textured matte glass back and Ceramic Shield front. Action button replaces the mute switch for customizable shortcuts. USB-C connector with USB 3 speeds up to 10 Gb/s. Supports MagSafe and Qi2 wireless charging. Available in Natural Titanium, Blue Titanium, White Titanium, and Black Titanium.',
+  specifications = '{
+    "subcategory": "Flagship smartphones",
+    "variant": "256 GB storage",
+    "chipset": "Apple A17 Pro (3 nm)",
+    "cpu": "6-core (2 performance + 4 efficiency)",
+    "gpu": "Apple 6-core GPU with hardware-accelerated ray tracing",
+    "display": "6.7-inch Super Retina XDR OLED, 2796 x 1290, 120Hz ProMotion",
+    "peak_brightness": "2000 nits (outdoor)",
+    "rear_camera": "48 MP main (f/1.78, 24mm) + 12 MP ultra-wide (f/2.2, 13mm) + 12 MP telephoto 5x (f/2.8, 120mm)",
+    "front_camera": "12 MP TrueDepth (f/1.9), autofocus",
+    "video": "4K Dolby Vision up to 60fps, ProRes, Cinematic mode, Action mode",
+    "ram": "8 GB",
+    "storage": "256 GB (NVMe)",
+    "battery": "4,441 mAh, up to 29 hours video playback",
+    "charging": "USB-C (USB 3, 10 Gb/s), 27W wired, 15W MagSafe, 7.5W Qi",
+    "os": "iOS 17 (upgradable to iOS 18)",
+    "sim": "Nano-SIM + eSIM (dual eSIM support)",
+    "connectivity": "5G (sub-6 GHz + mmWave), Wi-Fi 6E, Bluetooth 5.3, UWB chip (U2), NFC",
+    "biometrics": "Face ID (3D face recognition)",
+    "water_resistance": "IP68 (6m for 30 min)",
+    "material": "Grade 5 Titanium frame, textured matte glass back, Ceramic Shield front",
+    "dimensions": "159.9 x 76.7 x 8.25 mm",
+    "weight": "221 g",
+    "colors": "Natural Titanium, Blue Titanium, White Titanium, Black Titanium",
+    "in_the_box": "iPhone, USB-C cable (1m), documentation",
+    "warranty": "1 year manufacturer warranty",
+    "reference_price_basis": "India launch MRP for the 256 GB variant; not a current seller offer"
+  }'::jsonb,
+  tags = ARRAY['apple', 'iphone', 'iphone-15-pro-max', 'smartphone', 'flagship', '5g', 'titanium', 'a17-pro', 'pro-camera', '256gb'],
+  catalog_reference_price = 159900,
+  is_catalog_seed = true,
+  updated_at = NOW()
+WHERE id = 'cefaa1b4-2cf2-456d-9503-5e700f02a1d7';

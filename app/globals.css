@@ -1,0 +1,419 @@
+@import "tailwindcss";
+
+:root {
+  --background: #faf9f6;
+  --foreground: #101b19;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button,
+a,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline-color: #0f766e;
+}
+
+.catalog-marquee {
+  overflow: hidden;
+}
+
+.catalog-marquee-track {
+  animation: catalog-marquee 60s linear infinite;
+}
+
+.catalog-marquee:hover .catalog-marquee-track {
+  animation-play-state: paused;
+}
+
+@keyframes catalog-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* ── 11:11 Mega Sale Animations ── */
+@keyframes neon-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(234, 179, 8, 0.4), 0 0 16px rgba(239, 68, 68, 0.2); }
+  50% { box-shadow: 0 0 16px rgba(234, 179, 8, 0.7), 0 0 32px rgba(239, 68, 68, 0.4), 0 0 48px rgba(234, 179, 8, 0.2); }
+}
+
+@keyframes slide-gradient {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+@keyframes float-tag {
+  0%, 100% { transform: translateY(0) rotate(0deg); opacity: 0.6; }
+  50% { transform: translateY(-12px) rotate(5deg); opacity: 0.9; }
+}
+
+@keyframes cyber-glitch {
+  0%, 100% { transform: translate(0); }
+  20% { transform: translate(-2px, 1px); }
+  40% { transform: translate(2px, -1px); }
+  60% { transform: translate(-1px, -1px); }
+  80% { transform: translate(1px, 1px); }
+}
+
+.sale-neon-glow { animation: neon-pulse 2s ease-in-out infinite; }
+.sale-gradient-slide {
+  background: linear-gradient(90deg, #dc2626, #eab308, #f43f5e, #dc2626);
+  background-size: 200% 100%;
+  animation: slide-gradient 3s linear infinite;
+}
+.sale-float { animation: float-tag 4s ease-in-out infinite; }
+.sale-float-delay-1 { animation: float-tag 5s ease-in-out 0.7s infinite; }
+.sale-float-delay-2 { animation: float-tag 4.5s ease-in-out 1.4s infinite; }
+
+/* Page transition animations */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Staggered card animations */
+@keyframes card-appear {
+  from { opacity: 0; transform: translateY(16px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Mega menu animation */
+@keyframes mega-menu-enter {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.mega-menu-enter {
+  animation: mega-menu-enter 150ms ease-out both;
+}
+
+.animate-fade-in { animation: fade-in 0.4s ease-out both; }
+.animate-fade-in-up { animation: fade-in-up 0.5s ease-out both; }
+.animate-scale-in { animation: scale-in 0.3s ease-out both; }
+.animate-slide-in-right { animation: slide-in-right 0.4s ease-out both; }
+.animate-slide-in-left { animation: slide-in-left 0.4s ease-out both; }
+
+/* Product card staggered appearance */
+.product-card {
+  animation: card-appear 0.4s ease-out both;
+}
+
+/* Stagger delays for grid items */
+.product-card:nth-child(1) { animation-delay: 0ms; }
+.product-card:nth-child(2) { animation-delay: 50ms; }
+.product-card:nth-child(3) { animation-delay: 100ms; }
+.product-card:nth-child(4) { animation-delay: 150ms; }
+.product-card:nth-child(5) { animation-delay: 200ms; }
+.product-card:nth-child(6) { animation-delay: 250ms; }
+.product-card:nth-child(7) { animation-delay: 300ms; }
+.product-card:nth-child(8) { animation-delay: 350ms; }
+
+/* Cart add animation */
+@keyframes cart-bounce {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.2); }
+  60% { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
+.cart-bounce { animation: cart-bounce 0.4s ease-out; }
+
+/* Toast slide in */
+@keyframes toast-slide-in {
+  from { opacity: 0; transform: translateY(-100%) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes toast-slide-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-100%) scale(0.95); }
+}
+
+.toast-enter { animation: toast-slide-in 0.3s ease-out both; }
+.toast-exit { animation: toast-slide-out 0.2s ease-in both; }
+
+/* Skeleton shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* ── Dual Range Slider ── */
+.dual-range-slider {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: #e2e8f0;
+  margin: 10px 0;
+}
+
+.dual-range-slider .range-track-fill {
+  position: absolute;
+  height: 100%;
+  border-radius: 3px;
+  background: #0d9488;
+}
+
+.dual-range-slider input[type="range"] {
+  position: absolute;
+  width: 100%;
+  height: 6px;
+  top: -4px;
+  margin: 0;
+  padding: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  pointer-events: none;
+  outline: none;
+}
+
+.dual-range-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 20px;
+  width: 20px;
+  border-radius: 50%;
+  background: white;
+  border: 2px solid #0d9488;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+  cursor: pointer;
+  pointer-events: all;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+
+.dual-range-slider input[type="range"]::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 6px rgba(13,148,136,0.15);
+  transform: scale(1.1);
+}
+
+.dual-range-slider input[type="range"]::-moz-range-thumb {
+  height: 20px;
+  width: 20px;
+  border-radius: 50%;
+  background: white;
+  border: 2px solid #0d9488;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+  cursor: pointer;
+  pointer-events: all;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+
+.dual-range-slider input[type="range"]::-moz-range-thumb:hover {
+  box-shadow: 0 0 0 6px rgba(13,148,136,0.15);
+}
+
+/* ── Toggle Switch ── */
+.toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.toggle-switch .toggle-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: #cbd5e1;
+  transition: background 0.25s ease;
+  cursor: pointer;
+}
+
+.toggle-switch input:checked + .toggle-track {
+  background: #16a34a;
+}
+
+.toggle-switch .toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: transform 0.25s ease;
+}
+
+.toggle-switch input:checked + .toggle-track::after {
+  transform: translateX(20px);
+}
+
+.toggle-switch input:focus-visible + .toggle-track {
+  outline: 2px solid #0d9488;
+  outline-offset: 2px;
+}
+
+/* ── Collapsible Filter Section ── */
+.filter-section-body {
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.25s ease;
+}
+
+.filter-section-body.collapsed {
+  max-height: 0 !important;
+  opacity: 0;
+}
+
+.filter-section-body.expanded {
+  opacity: 1;
+}
+
+.filter-chevron {
+  transition: transform 0.25s ease;
+}
+
+.filter-chevron.rotated {
+  transform: rotate(180deg);
+}
+
+/* ── Filter Chips ── */
+@keyframes chip-in {
+  from { opacity: 0; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes chip-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.85); }
+}
+
+.filter-chip {
+  animation: chip-in 0.2s ease-out both;
+}
+
+/* ── Mobile Filter Panel ── */
+@keyframes filter-slide-in {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes filter-slide-out {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(100%); }
+}
+
+@keyframes backdrop-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes backdrop-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.filter-panel-enter {
+  animation: filter-slide-in 0.3s ease-out both;
+}
+
+.filter-panel-exit {
+  animation: filter-slide-out 0.25s ease-in both;
+}
+
+.filter-backdrop-enter {
+  animation: backdrop-fade-in 0.3s ease-out both;
+}
+
+.filter-backdrop-exit {
+  animation: backdrop-fade-out 0.25s ease-in both;
+}
+
+/* ── Product Grid Fade ── */
+.product-grid-fade {
+  transition: opacity 0.3s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .catalog-marquee {
+    overflow-x: auto;
+  }
+
+  .catalog-marquee-track {
+    animation: none;
+    transform: none;
+  }
+}

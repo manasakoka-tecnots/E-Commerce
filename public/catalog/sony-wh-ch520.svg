@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600" role="img" aria-labelledby="title description">
+  <title id="title">Wireless on-ear headphones illustration</title>
+  <desc id="description">Original illustration of blue wireless on-ear headphones.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" x2="1" y1="0" y2="1">
+      <stop stop-color="#eff6ff"/>
+      <stop offset="1" stop-color="#dbeafe"/>
+    </linearGradient>
+    <linearGradient id="band" x1="0" x2="1">
+      <stop stop-color="#2563eb"/>
+      <stop offset=".5" stop-color="#60a5fa"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="600" rx="32" fill="url(#background)"/>
+  <ellipse cx="400" cy="480" rx="225" ry="34" fill="#bfdbfe"/>
+  <path d="M225 335V270c0-112 78-192 175-192s175 80 175 192v65" fill="none" stroke="#1e3a8a" stroke-linecap="round" stroke-width="54"/>
+  <path d="M241 323V274c0-94 70-160 159-160s159 66 159 160v49" fill="none" stroke="url(#band)" stroke-linecap="round" stroke-width="36"/>
+  <rect x="194" y="286" width="112" height="176" rx="44" fill="#1d4ed8"/>
+  <rect x="207" y="301" width="87" height="147" rx="38" fill="#60a5fa"/>
+  <rect x="494" y="286" width="112" height="176" rx="44" fill="#1d4ed8"/>
+  <rect x="506" y="301" width="87" height="147" rx="38" fill="#60a5fa"/>
+  <rect x="220" y="320" width="62" height="108" rx="29" fill="#1e40af" opacity=".8"/>
+  <rect x="518" y="320" width="62" height="108" rx="29" fill="#1e40af" opacity=".8"/>
+  <path d="M247 341h6M546 341h6" stroke="#dbeafe" stroke-linecap="round" stroke-width="6"/>
+</svg>

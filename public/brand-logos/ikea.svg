@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 80">
+  <rect width="200" height="80" rx="6" fill="#0058A3"/>
+  <rect x="8" y="8" width="184" height="64" rx="3" fill="#FFDA1A"/>
+  <text x="100" y="55" font-family="Arial, Helvetica, sans-serif" font-size="46" font-weight="bold" fill="#0058A3" text-anchor="middle">IKEA</text>
+</svg>
