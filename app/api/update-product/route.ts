@@ -76,10 +76,11 @@ export async function PUT(request: NextRequest) {
 
     // Update product
     if (updates && Object.keys(updates).length > 0) {
-      const { error: updateError } = await supabase
+      const { data: updatedRows, error: updateError } = await supabase
         .from("products")
         .update(updates)
-        .eq("id", productId);
+        .eq("id", productId)
+        .select("id");
 
       if (updateError) {
         return NextResponse.json(
@@ -87,20 +88,35 @@ export async function PUT(request: NextRequest) {
           { status: 500 }
         );
       }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        return NextResponse.json(
+          { error: "Product update failed — no rows updated. This may be a permissions issue." },
+          { status: 403 }
+        );
+      }
     }
 
     // Update or create seller listing
     if (listingUpdates) {
       if (listingId) {
-        const { error: listingError } = await supabase
+        const { data: updatedListings, error: listingError } = await supabase
           .from("seller_listings")
           .update(listingUpdates)
-          .eq("id", listingId);
+          .eq("id", listingId)
+          .select("id");
 
         if (listingError) {
           return NextResponse.json(
             { error: `Failed to update listing: ${listingError.message}` },
             { status: 500 }
+          );
+        }
+
+        if (!updatedListings || updatedListings.length === 0) {
+          return NextResponse.json(
+            { error: "Listing update failed — no rows updated. This may be a permissions issue." },
+            { status: 403 }
           );
         }
       } else if (sellerId) {

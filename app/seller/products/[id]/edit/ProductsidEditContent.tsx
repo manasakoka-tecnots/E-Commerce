@@ -22,9 +22,22 @@ type VariantRow = {
   id?: string;
   combination: string;
   sku: string;
+  barcode: string;
   price: string;
   stock: string;
   available: boolean;
+};
+
+type SellerLocation = {
+  id: string;
+  name: string;
+  type: string;
+  is_default: boolean;
+};
+
+type LocationStockEntry = {
+  location_id: string;
+  available: number;
 };
 
 type ExistingImage = {
@@ -161,6 +174,12 @@ export default function ProductsidEditContent() {
   const [removedImageIds, setRemovedImageIds] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  /* Locations & per-location stock */
+  const [locations, setLocations] = useState<SellerLocation[]>([]);
+  const [locationStock, setLocationStock] = useState<Record<string, number>>({});
+  /* Per-variant per-location stock: { variantId: { locationId: qty } } */
+  const [variantLocationStock, setVariantLocationStock] = useState<Record<string, Record<string, number>>>({});
+
   /* Variants */
   const [variantOptions, setVariantOptions] = useState<VariantOption[]>([]);
   const [variantRows, setVariantRows] = useState<VariantRow[]>([]);
@@ -170,6 +189,15 @@ export default function ProductsidEditContent() {
   const [deleting, setDeleting] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [success, setSuccess] = useState<string | null>(null);
+
+  /* ---- Toast notification ---- */
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = useCallback((message: string, type: "success" | "error") => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ message, type });
+    toastTimer.current = setTimeout(() => setToast(null), 4000);
+  }, []);
 
   /* ---- field helpers ---- */
   const set = useCallback(
@@ -214,6 +242,15 @@ export default function ProductsidEditContent() {
 
       setSellerId(seller.id);
 
+      /* Load seller locations */
+      const { data: locs } = await supabase
+        .from("seller_locations")
+        .select("id, name, type, is_default")
+        .eq("seller_id", seller.id)
+        .eq("is_active", true)
+        .order("fulfillment_priority", { ascending: true });
+      if (locs && locs.length > 0) setLocations(locs);
+
       /* Load categories */
       const { data: cats } = await supabase
         .from("categories")
@@ -242,6 +279,33 @@ export default function ProductsidEditContent() {
         .eq("seller_id", seller.id)
         .maybeSingle();
 
+      /* Load per-location inventory */
+      if (listing && locs && locs.length > 0) {
+        const { data: locInv, error: locInvErr } = await supabase
+          .from("location_inventory")
+          .select("location_id, available")
+          .eq("listing_id", listing.id)
+          .is("variant_id", null);
+        if (locInvErr) {
+          console.error("Failed to load location inventory:", locInvErr);
+          // Don't set stock to 0 on error — leave state unchanged
+        } else {
+          const stockMap: Record<string, number> = {};
+          locs.forEach((loc) => { stockMap[loc.id] = 0; });
+          const hasLocInvRecords = locInv && locInv.length > 0;
+          if (hasLocInvRecords) {
+            locInv.forEach((row) => { stockMap[row.location_id] = row.available ?? 0; });
+          } else if (listing.stock > 0) {
+            // No location_inventory records yet — show legacy stock at default location
+            const defaultLoc = locs.find((l: { is_default: boolean }) => l.is_default) || locs[0];
+            if (defaultLoc) {
+              stockMap[defaultLoc.id] = Number(listing.stock) || 0;
+            }
+          }
+          setLocationStock(stockMap);
+        }
+      }
+
       /* Load images */
       const { data: imgData } = await supabase
         .from("product_images")
@@ -260,7 +324,7 @@ export default function ProductsidEditContent() {
       /* Load variants */
       const { data: variantsData } = await supabase
         .from("product_variants")
-        .select("id, title, sku, price, stock, is_available, option1_name, option1_value, option2_name, option2_value, option3_name, option3_value")
+        .select("id, title, sku, barcode, price, stock, is_available, option1_name, option1_value, option2_name, option2_value, option3_name, option3_value")
         .eq("product_id", productId);
 
       if (variantsData && variantsData.length > 0) {
@@ -285,11 +349,38 @@ export default function ProductsidEditContent() {
             id: v.id,
             combination: v.title,
             sku: v.sku ?? "",
+            barcode: v.barcode ?? "",
             price: v.price != null ? String(v.price) : "",
             stock: String(v.stock ?? 0),
             available: v.is_available ?? true,
           }))
         );
+      }
+
+      /* Load per-variant per-location inventory */
+      if (listing && locs && locs.length > 0 && variantsData && variantsData.length > 0) {
+        const { data: varLocInv, error: varLocInvErr } = await supabase
+          .from("location_inventory")
+          .select("location_id, available, variant_id")
+          .eq("listing_id", listing.id)
+          .not("variant_id", "is", null);
+        if (varLocInvErr) {
+          console.error("Failed to load variant location inventory:", varLocInvErr);
+        } else {
+          const vlStock: Record<string, Record<string, number>> = {};
+          variantsData.forEach((v) => {
+            vlStock[v.id] = {};
+            locs.forEach((loc) => { vlStock[v.id][loc.id] = 0; });
+          });
+          if (varLocInv && varLocInv.length > 0) {
+            varLocInv.forEach((row) => {
+              if (row.variant_id && vlStock[row.variant_id]) {
+                vlStock[row.variant_id][row.location_id] = row.available ?? 0;
+              }
+            });
+          }
+          setVariantLocationStock(vlStock);
+        }
       }
 
       /* Populate form */
@@ -302,40 +393,42 @@ export default function ProductsidEditContent() {
         title: product.name ?? "",
         description: product.description ?? "",
         brand: product.brand ?? "",
-        productType: "",
+        productType: product.product_type ?? "",
         tagsInput: "",
-        tags: [],
+        tags: Array.isArray(product.tags) ? product.tags : [],
         price: listing ? String(listing.price) : "",
-        compareAtPrice: product.catalog_reference_price
-          ? String(product.catalog_reference_price)
-          : "",
-        costPerItem: "",
-        taxApplicable: true,
-        sku: "",
-        barcode: "",
-        trackQuantity: true,
+        compareAtPrice: product.compare_at_price
+          ? String(product.compare_at_price)
+          : product.catalog_reference_price
+            ? String(product.catalog_reference_price)
+            : "",
+        costPerItem: product.cost_per_item ? String(product.cost_per_item) : "",
+        taxApplicable: product.tax_applicable ?? true,
+        sku: product.sku ?? "",
+        barcode: product.barcode ?? "",
+        trackQuantity: product.track_quantity ?? true,
         stock: listing ? String(listing.stock) : "0",
-        continueSellingOutOfStock: false,
-        lowStockThreshold: "5",
-        isPhysical: true,
-        weight: "",
-        weightUnit: "kg",
-        dimensionL: "",
-        dimensionW: "",
-        dimensionH: "",
-        countryOfOrigin: "India",
-        hsCode: "",
-        shippingFee: "",
-        processingTime: "1-2 business days",
-        deliveryDuration: "3-7 business days",
-        shippingRestrictions: "",
-        fulfillmentNotes: "",
-        seoTitle: product.name ?? "",
-        metaDescription: (product.description ?? "").slice(0, 160),
-        urlHandle: slugify(product.name ?? ""),
+        continueSellingOutOfStock: product.continue_selling_when_oos ?? false,
+        lowStockThreshold: product.low_stock_threshold ? String(product.low_stock_threshold) : "5",
+        isPhysical: product.is_physical_product ?? true,
+        weight: product.weight ? String(product.weight) : "",
+        weightUnit: product.weight_unit ?? "kg",
+        dimensionL: product.package_length ? String(product.package_length) : "",
+        dimensionW: product.package_width ? String(product.package_width) : "",
+        dimensionH: product.package_height ? String(product.package_height) : "",
+        countryOfOrigin: product.country_of_origin ?? "India",
+        hsCode: product.hs_code ?? "",
+        shippingFee: product.shipping_fee ? String(product.shipping_fee) : "",
+        processingTime: product.processing_time ?? "1-2 business days",
+        deliveryDuration: product.delivery_duration ?? "3-7 business days",
+        shippingRestrictions: product.shipping_restrictions ?? "",
+        fulfillmentNotes: product.fulfillment_notes ?? "",
+        seoTitle: product.seo_title ?? product.name ?? "",
+        metaDescription: product.meta_description ?? (product.description ?? "").slice(0, 160),
+        urlHandle: product.url_handle ?? slugify(product.name ?? ""),
         status: productStatus,
         categoryId: product.category_id ?? "",
-        subcategory: "",
+        subcategory: product.subcategory ?? "",
       });
 
       setListingId(listing?.id ?? null);
@@ -481,6 +574,7 @@ export default function ProductsidEditContent() {
           existing ?? {
             combination,
             sku: "",
+            barcode: "",
             price: "",
             stock: "",
             available: true,
@@ -529,8 +623,13 @@ export default function ProductsidEditContent() {
     if (isNaN(price) || price < 0) errs.push("Valid selling price is required.");
     if (form.compareAtPrice && parseFloat(form.compareAtPrice) < 0) errs.push("Compare-at price cannot be negative.");
     if (form.costPerItem && parseFloat(form.costPerItem) < 0) errs.push("Cost per item cannot be negative.");
-    const stock = parseInt(form.stock, 10);
-    if (isNaN(stock) || stock < 0) errs.push("Available stock is required (>= 0).");
+    if (locations.length > 0) {
+      const totalLocStock = Object.values(locationStock).reduce((s, v) => s + v, 0);
+      if (totalLocStock < 0) errs.push("Stock cannot be negative.");
+    } else {
+      const stock = parseInt(form.stock, 10);
+      if (isNaN(stock) || stock < 0) errs.push("Available stock is required (>= 0).");
+    }
     if (!form.categoryId) errs.push("Please select a category.");
     return errs;
   };
@@ -539,6 +638,7 @@ export default function ProductsidEditContent() {
     const validationErrors = validate();
     if (validationErrors.length) {
       setErrors(validationErrors);
+      showToast(`${validationErrors.length} validation error(s) found`, "error");
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
@@ -584,6 +684,33 @@ export default function ProductsidEditContent() {
             brand: form.brand.trim() || null,
             category_id: form.categoryId || null,
             status: productStatus,
+            product_type: form.productType.trim() || null,
+            tags: form.tags.length > 0 ? form.tags : [],
+            subcategory: form.subcategory.trim() || null,
+            compare_at_price: form.compareAtPrice ? parseFloat(form.compareAtPrice) : null,
+            cost_per_item: form.costPerItem ? parseFloat(form.costPerItem) : null,
+            tax_applicable: form.taxApplicable,
+            sku: form.sku.trim() || null,
+            barcode: form.barcode.trim() || null,
+            track_quantity: form.trackQuantity,
+            continue_selling_when_oos: form.continueSellingOutOfStock,
+            low_stock_threshold: form.lowStockThreshold ? parseInt(form.lowStockThreshold) : 5,
+            is_physical_product: form.isPhysical,
+            weight: form.weight ? parseFloat(form.weight) : null,
+            weight_unit: form.weightUnit || "kg",
+            package_length: form.dimensionL ? parseFloat(form.dimensionL) : null,
+            package_width: form.dimensionW ? parseFloat(form.dimensionW) : null,
+            package_height: form.dimensionH ? parseFloat(form.dimensionH) : null,
+            country_of_origin: form.countryOfOrigin.trim() || "India",
+            hs_code: form.hsCode.trim() || null,
+            shipping_fee: form.shippingFee ? parseFloat(form.shippingFee) : null,
+            processing_time: form.processingTime.trim() || null,
+            delivery_duration: form.deliveryDuration.trim() || null,
+            shipping_restrictions: form.shippingRestrictions.trim() || null,
+            fulfillment_notes: form.fulfillmentNotes.trim() || null,
+            seo_title: form.seoTitle.trim() || null,
+            meta_description: form.metaDescription.trim() || null,
+            url_handle: form.urlHandle.trim() || null,
           },
           listingUpdates: listingPayload,
           listingId,
@@ -593,11 +720,16 @@ export default function ProductsidEditContent() {
 
       const updateResult = await updateRes.json();
       if (!updateRes.ok) {
-        setErrors([updateResult.error || "Failed to update product"]);
+        const errMsg = updateResult.error || "Failed to update product";
+        setErrors([errMsg]);
+        showToast(errMsg, "error");
         setSubmitting(false);
         return;
       }
+      // Capture effective listing ID synchronously (React setState is async)
+      let effectiveListingId = listingId;
       if (updateResult.newListingId) {
+        effectiveListingId = updateResult.newListingId;
         setListingId(updateResult.newListingId);
       }
 
@@ -650,22 +782,33 @@ export default function ProductsidEditContent() {
 
       /* 5. Listing already updated via API above */
 
-      /* 6. Handle variants */
-      await supabase
+      /* 6. Handle variants — upsert to preserve IDs & location_inventory links */
+      const validOpts = variantOptions.filter(
+        (o) => o.name.trim() && o.values.length > 0
+      );
+      let finalVariantIds: { id: string; title: string }[] = [];
+
+      // Get existing variants from DB
+      const { data: existingDbVariants } = await supabase
         .from("product_variants")
-        .delete()
+        .select("id, title")
         .eq("product_id", productId);
+      const existingMap = new Map((existingDbVariants || []).map((v) => [v.title, v.id]));
 
       if (variantRows.length > 0) {
-        const validOpts = variantOptions.filter(
-          (o) => o.name.trim() && o.values.length > 0
-        );
-        const variantInserts = variantRows.map((v) => {
+        // Separate into updates (existing) and inserts (new)
+        const toUpdate: { id: string; data: Record<string, unknown> }[] = [];
+        const toInsert: Record<string, unknown>[] = [];
+        const currentTitles = new Set<string>();
+
+        for (const v of variantRows) {
           const parts = v.combination.split(" / ");
-          return {
+          currentTitles.add(v.combination);
+          const payload = {
             product_id: productId,
             title: v.combination,
             sku: v.sku || null,
+            barcode: v.barcode || null,
             price: v.price ? parseFloat(v.price) : null,
             stock: v.stock ? parseInt(v.stock, 10) : 0,
             is_available: v.available,
@@ -676,21 +819,229 @@ export default function ProductsidEditContent() {
             option3_name: validOpts[2]?.name || null,
             option3_value: parts[2] || null,
           };
-        });
-        const { error: variantError } = await supabase.from("product_variants").insert(variantInserts);
-        if (variantError) {
-          setErrors([`Product updated but variants failed: ${variantError.message}`]);
-          setSubmitting(false);
-          return;
+
+          const existingId = v.id || existingMap.get(v.combination);
+          if (existingId) {
+            toUpdate.push({ id: existingId, data: payload });
+          } else {
+            toInsert.push(payload);
+          }
+        }
+
+        // Delete removed variants (and their location_inventory via cascade or manual)
+        const removedIds = (existingDbVariants || [])
+          .filter((v) => !currentTitles.has(v.title))
+          .map((v) => v.id);
+        if (removedIds.length > 0) {
+          await supabase.from("location_inventory").delete().in("variant_id", removedIds);
+          await supabase.from("product_variants").delete().in("id", removedIds);
+        }
+
+        // Update existing variants (preserves IDs)
+        for (const item of toUpdate) {
+          await supabase.from("product_variants").update(item.data).eq("id", item.id);
+          finalVariantIds.push({ id: item.id, title: item.data.title as string });
+        }
+
+        // Insert new variants
+        if (toInsert.length > 0) {
+          const { data: newVariants, error: variantError } = await supabase
+            .from("product_variants")
+            .insert(toInsert)
+            .select("id, title");
+          if (variantError) {
+            const errMsg = `Product updated but variants failed: ${variantError.message}`;
+            setErrors([errMsg]);
+            showToast(errMsg, "error");
+            setSubmitting(false);
+            return;
+          }
+          finalVariantIds.push(...(newVariants || []));
+        }
+      } else {
+        // No variants — delete all existing
+        if (existingDbVariants && existingDbVariants.length > 0) {
+          const ids = existingDbVariants.map((v) => v.id);
+          await supabase.from("location_inventory").delete().in("variant_id", ids);
+          await supabase.from("product_variants").delete().eq("product_id", productId);
         }
       }
 
+      /* 7. Upsert per-location inventory via RPC (SECURITY DEFINER, atomic) */
+      const finalListingId = effectiveListingId;
+      const inventoryErrors: string[] = [];
+      if (locations.length > 0 && finalListingId) {
+        if (variantRows.length > 0 && finalVariantIds.length > 0) {
+          /* Per-variant per-location inventory */
+          for (const fv of finalVariantIds) {
+            const matchingRow = variantRows.find((r) => r.combination === fv.title);
+            // Try multiple keys: the variant's DB id, the matching row's id,
+            // the combination title, or the matching row's combination
+            const vlStock = variantLocationStock[fv.id]
+              || (matchingRow?.id ? variantLocationStock[matchingRow.id] : undefined)
+              || variantLocationStock[fv.title]
+              || (matchingRow?.combination ? variantLocationStock[matchingRow.combination] : undefined)
+              || {};
+
+            for (const loc of locations) {
+              const qty = vlStock[loc.id] ?? 0;
+              const { error: rpcErr } = await supabase.rpc("adjust_location_inventory", {
+                p_location_id: loc.id,
+                p_listing_id: finalListingId,
+                p_adjustment_type: "set",
+                p_quantity_change: qty,
+                p_reason: "Product edit save",
+                p_variant_id: fv.id,
+              });
+              if (rpcErr) {
+                console.error("adjust_location_inventory RPC error:", rpcErr);
+                inventoryErrors.push(`Stock save failed for ${fv.title} at ${loc.name}: ${rpcErr.message}`);
+              }
+            }
+          }
+        } else {
+          /* Product-level (no variants) per-location inventory */
+          for (const loc of locations) {
+            const qty = locationStock[loc.id] ?? 0;
+            const { error: rpcErr } = await supabase.rpc("adjust_location_inventory", {
+              p_location_id: loc.id,
+              p_listing_id: finalListingId,
+              p_adjustment_type: "set",
+              p_quantity_change: qty,
+              p_reason: "Product edit save",
+            });
+            if (rpcErr) {
+              console.error("adjust_location_inventory RPC error:", rpcErr);
+              inventoryErrors.push(`Stock save failed at ${loc.name}: ${rpcErr.message}`);
+            }
+          }
+        }
+      }
+      if (inventoryErrors.length > 0) {
+        console.error("Inventory save errors:", inventoryErrors);
+        setErrors(inventoryErrors);
+        showToast("Failed to save inventory. Check errors above.", "error");
+        setSubmitting(false);
+        return;
+      }
+
+      /* 8. Stock sync is handled by the RPC (adjust_location_inventory syncs
+         seller_listings.stock and product_variants.stock automatically) */
+
       setSuccess("Product updated successfully!");
+      showToast("Product updated successfully!", "success");
       setRemovedImageIds([]);
       setNewImages([]);
       window.scrollTo({ top: 0, behavior: "smooth" });
+
+      /* Reload data from DB to confirm persistence */
+      const { data: freshProduct } = await supabase
+        .from("products")
+        .select("*")
+        .eq("id", productId)
+        .single();
+
+      // Reload listing to get synced stock
+      const { data: freshListing } = await supabase
+        .from("seller_listings")
+        .select("id, stock")
+        .eq("id", finalListingId)
+        .maybeSingle();
+
+      if (freshProduct) {
+        setForm((prev) => ({
+          ...prev,
+          title: freshProduct.name ?? "",
+          description: freshProduct.description ?? "",
+          brand: freshProduct.brand ?? "",
+          productType: freshProduct.product_type ?? "",
+          tags: Array.isArray(freshProduct.tags) ? freshProduct.tags : [],
+          compareAtPrice: freshProduct.compare_at_price ? String(freshProduct.compare_at_price) : "",
+          costPerItem: freshProduct.cost_per_item ? String(freshProduct.cost_per_item) : "",
+          taxApplicable: freshProduct.tax_applicable ?? true,
+          sku: freshProduct.sku ?? "",
+          barcode: freshProduct.barcode ?? "",
+          trackQuantity: freshProduct.track_quantity ?? true,
+          stock: freshListing ? String(freshListing.stock) : prev.stock,
+          continueSellingOutOfStock: freshProduct.continue_selling_when_oos ?? false,
+          lowStockThreshold: freshProduct.low_stock_threshold ? String(freshProduct.low_stock_threshold) : "5",
+          isPhysical: freshProduct.is_physical_product ?? true,
+          weight: freshProduct.weight ? String(freshProduct.weight) : "",
+          weightUnit: freshProduct.weight_unit ?? "kg",
+          dimensionL: freshProduct.package_length ? String(freshProduct.package_length) : "",
+          dimensionW: freshProduct.package_width ? String(freshProduct.package_width) : "",
+          dimensionH: freshProduct.package_height ? String(freshProduct.package_height) : "",
+          countryOfOrigin: freshProduct.country_of_origin ?? "India",
+          hsCode: freshProduct.hs_code ?? "",
+          shippingFee: freshProduct.shipping_fee ? String(freshProduct.shipping_fee) : "",
+          processingTime: freshProduct.processing_time ?? "1-2 business days",
+          deliveryDuration: freshProduct.delivery_duration ?? "3-7 business days",
+          shippingRestrictions: freshProduct.shipping_restrictions ?? "",
+          fulfillmentNotes: freshProduct.fulfillment_notes ?? "",
+          seoTitle: freshProduct.seo_title ?? freshProduct.name ?? "",
+          metaDescription: freshProduct.meta_description ?? "",
+          urlHandle: freshProduct.url_handle ?? "",
+          categoryId: freshProduct.category_id ?? "",
+          subcategory: freshProduct.subcategory ?? "",
+        }));
+      }
+
+      /* ── Post-save: keep the form state as-is (already correct) ──
+         Previously we reloaded location_inventory from DB here, but that
+         caused a race condition: the reload initialized all locations to 0,
+         then populated from a query that could return stale data (Supabase
+         read-after-write latency). The RPC calls above already saved the
+         exact values the user entered, so there's nothing to reload.
+
+         Only reload variant rows (IDs may have changed for new variants). */
+      if (finalVariantIds.length > 0) {
+        const { data: freshVariants } = await supabase
+          .from("product_variants")
+          .select("id, title, sku, barcode, price, stock, is_available, option1_name, option1_value, option2_name, option2_value, option3_name, option3_value")
+          .eq("product_id", productId);
+        if (freshVariants && freshVariants.length > 0) {
+          // Build a mapping from old combination key -> new DB id
+          const titleToNewId: Record<string, string> = {};
+          freshVariants.forEach((v) => { titleToNewId[v.title] = v.id; });
+
+          setVariantRows(
+            freshVariants.map((v) => ({
+              id: v.id,
+              combination: v.title,
+              sku: v.sku ?? "",
+              barcode: v.barcode ?? "",
+              price: v.price != null ? String(v.price) : "",
+              stock: String(v.stock ?? 0),
+              available: v.is_available ?? true,
+            }))
+          );
+
+          // Re-key variantLocationStock from old keys to new DB ids
+          // so the UI shows the correct stock after save
+          setVariantLocationStock((prev) => {
+            const updated: Record<string, Record<string, number>> = {};
+            freshVariants.forEach((v) => {
+              // Try to find existing stock data by new id, old id, or combination title
+              const existing = prev[v.id]
+                || Object.entries(prev).find(([key]) => {
+                  // Match by combination title (handles case where key was the title)
+                  const oldRow = variantRows.find((r) => r.id === key || r.combination === key);
+                  return oldRow?.combination === v.title;
+                })?.[1]
+                || {};
+              updated[v.id] = {};
+              locations.forEach((loc) => {
+                updated[v.id][loc.id] = existing[loc.id] ?? 0;
+              });
+            });
+            return updated;
+          });
+        }
+      }
     } catch (err) {
-      setErrors([err instanceof Error ? err.message : "An unexpected error occurred."]);
+      const errMsg = err instanceof Error ? err.message : "An unexpected error occurred.";
+      setErrors([errMsg]);
+      showToast(errMsg, "error");
     } finally {
       setSubmitting(false);
     }
@@ -715,7 +1066,9 @@ export default function ProductsidEditContent() {
       await supabase.from("products").delete().eq("id", productId);
       router.push("/seller/products");
     } catch (err) {
-      setErrors([err instanceof Error ? err.message : "Failed to delete product."]);
+      const errMsg = err instanceof Error ? err.message : "Failed to delete product.";
+      setErrors([errMsg]);
+      showToast(errMsg, "error");
       setDeleting(false);
     }
   };
@@ -1141,32 +1494,99 @@ export default function ProductsidEditContent() {
                   Track quantity
                 </label>
                 {form.trackQuantity && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 block mb-1">
-                        Available stock <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={form.stock}
-                        onChange={(e) => set("stock", e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 block mb-1">
-                        Low stock threshold
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={form.lowStockThreshold}
-                        onChange={(e) => set("lowStockThreshold", e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none"
-                      />
+                  <div className="mt-3 space-y-4">
+                    {locations.length > 0 && variantRows.length > 0 ? (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+                        <p className="text-sm text-blue-800 font-medium">Stock is tracked per variant</p>
+                        <p className="text-xs text-blue-600 mt-1">
+                          Set stock for each variant at each location in the Variants section below.
+                        </p>
+                      </div>
+                    ) : locations.length > 0 ? (
+                      <>
+                        <div className="border border-gray-200 rounded-lg overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="text-left px-4 py-2.5 font-medium text-gray-700">Location</th>
+                                <th className="text-right px-4 py-2.5 font-medium text-gray-700 w-32">Available</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {locations.map((loc) => (
+                                <tr key={loc.id} className="hover:bg-gray-50/50">
+                                  <td className="px-4 py-2.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-gray-900">{loc.name}</span>
+                                      {loc.is_default && (
+                                        <span className="text-[10px] font-medium bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">Default</span>
+                                      )}
+                                      <span className="text-[10px] text-gray-400 capitalize">{loc.type.replace("_", " ")}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-2.5">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      value={locationStock[loc.id] ?? 0}
+                                      onChange={(e) => {
+                                        const val = Math.max(0, parseInt(e.target.value) || 0);
+                                        setLocationStock((prev) => ({ ...prev, [loc.id]: val }));
+                                        // Sync total to form.stock
+                                        const total = Object.entries({ ...locationStock, [loc.id]: val })
+                                          .reduce((sum, [, v]) => sum + v, 0);
+                                        set("stock", String(total));
+                                      }}
+                                      className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-right focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none"
+                                    />
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot className="bg-gray-50 border-t border-gray-200">
+                              <tr>
+                                <td className="px-4 py-2.5 font-medium text-gray-900">Total</td>
+                                <td className="px-4 py-2.5 text-right font-semibold text-gray-900">
+                                  {Object.values(locationStock).reduce((sum, v) => sum + v, 0)}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          Set stock for each location. The total is saved as the product&apos;s available stock.
+                        </p>
+                      </>
+                    ) : (
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 block mb-1">
+                          Available stock <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={form.stock}
+                          onChange={(e) => set("stock", e.target.value)}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none"
+                        />
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 block mb-1">
+                          Low stock threshold
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={form.lowStockThreshold}
+                          onChange={(e) => set("lowStockThreshold", e.target.value)}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1323,30 +1743,110 @@ export default function ProductsidEditContent() {
                       <tr>
                         <th className="py-2 px-3">Variant</th>
                         <th className="py-2 px-3">SKU</th>
+                        <th className="py-2 px-3">Barcode</th>
                         <th className="py-2 px-3">Price override (INR)</th>
-                        <th className="py-2 px-3">Stock</th>
+                        {locations.length > 0 ? (
+                          <>
+                            {locations.map((loc) => (
+                              <th key={loc.id} className="py-2 px-3 text-center" title={loc.name}>
+                                <div className="truncate max-w-[80px]">{loc.name.split(" ")[0]}</div>
+                                <div className="text-[9px] text-gray-400 normal-case font-normal">{loc.type.replace("_", " ")}</div>
+                              </th>
+                            ))}
+                            <th className="py-2 px-3 text-center">Total</th>
+                          </>
+                        ) : (
+                          <th className="py-2 px-3">Stock</th>
+                        )}
                         <th className="py-2 px-3">Available</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {variantRows.map((row, i) => (
-                        <tr key={row.combination}>
-                          <td className="py-2 px-3 font-medium text-gray-800 text-xs">{row.combination}</td>
-                          <td className="py-2 px-3">
-                            <input type="text" value={row.sku} onChange={(e) => updateVariantRow(i, "sku", e.target.value)} className="w-24 rounded border border-gray-300 px-2 py-1 text-xs focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none" />
-                          </td>
-                          <td className="py-2 px-3">
-                            <input type="number" min="0" step="0.01" value={row.price} onChange={(e) => updateVariantRow(i, "price", e.target.value)} placeholder="Use default" className="w-28 rounded border border-gray-300 px-2 py-1 text-xs focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none" />
-                          </td>
-                          <td className="py-2 px-3">
-                            <input type="number" min="0" step="1" value={row.stock} onChange={(e) => updateVariantRow(i, "stock", e.target.value)} className="w-20 rounded border border-gray-300 px-2 py-1 text-xs focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none" />
-                          </td>
-                          <td className="py-2 px-3">
-                            <input type="checkbox" checked={row.available} onChange={(e) => updateVariantRow(i, "available", e.target.checked)} className="rounded border-gray-300 text-indigo-500 focus:ring-indigo-300" />
-                          </td>
-                        </tr>
-                      ))}
+                      {variantRows.map((row, i) => {
+                        const variantId = row.id || row.combination;
+                        const vlStock = variantLocationStock[variantId] || {};
+                        const totalLocStock = locations.length > 0
+                          ? locations.reduce((sum, loc) => sum + (vlStock[loc.id] ?? 0), 0)
+                          : 0;
+                        return (
+                          <tr key={row.combination}>
+                            <td className="py-2 px-3 font-medium text-gray-800 text-xs">{row.combination}</td>
+                            <td className="py-2 px-3">
+                              <input type="text" value={row.sku || ""} onChange={(e) => updateVariantRow(i, "sku", e.target.value)} className="w-24 rounded border border-gray-300 px-2 py-1 text-xs focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none" />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input type="text" value={row.barcode || ""} onChange={(e) => updateVariantRow(i, "barcode", e.target.value)} placeholder="UPC, EAN..." className="w-28 rounded border border-gray-300 px-2 py-1 text-xs focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none" />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input type="number" min="0" step="0.01" value={row.price ?? ""} onChange={(e) => updateVariantRow(i, "price", e.target.value)} placeholder="Use default" className="w-28 rounded border border-gray-300 px-2 py-1 text-xs focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none" />
+                            </td>
+                            {locations.length > 0 ? (
+                              <>
+                                {locations.map((loc) => (
+                                  <td key={loc.id} className="py-2 px-3">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      value={vlStock[loc.id] ?? 0}
+                                      onChange={(e) => {
+                                        const val = Math.max(0, parseInt(e.target.value) || 0);
+                                        setVariantLocationStock((prev) => ({
+                                          ...prev,
+                                          [variantId]: { ...(prev[variantId] || {}), [loc.id]: val },
+                                        }));
+                                        // Sync variant total stock to variantRow.stock
+                                        const newTotal = locations.reduce(
+                                          (sum, l) => sum + (l.id === loc.id ? val : (vlStock[l.id] ?? 0)),
+                                          0
+                                        );
+                                        updateVariantRow(i, "stock", String(newTotal));
+                                      }}
+                                      className="w-16 rounded border border-gray-300 px-2 py-1 text-xs text-center focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none"
+                                    />
+                                  </td>
+                                ))}
+                                <td className="py-2 px-3 text-center font-semibold text-gray-700 text-xs">
+                                  {totalLocStock}
+                                </td>
+                              </>
+                            ) : (
+                              <td className="py-2 px-3">
+                                <input type="number" min="0" step="1" value={row.stock ?? ""} onChange={(e) => updateVariantRow(i, "stock", e.target.value)} className="w-20 rounded border border-gray-300 px-2 py-1 text-xs focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none" />
+                              </td>
+                            )}
+                            <td className="py-2 px-3">
+                              <input type="checkbox" checked={row.available} onChange={(e) => updateVariantRow(i, "available", e.target.checked)} className="rounded border-gray-300 text-indigo-500 focus:ring-indigo-300" />
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
+                    {locations.length > 0 && (
+                      <tfoot className="bg-gray-50 border-t border-gray-200">
+                        <tr>
+                          <td colSpan={4} className="py-2 px-3 font-medium text-gray-900 text-xs">Total across all variants</td>
+                          {locations.map((loc) => {
+                            const locTotal = variantRows.reduce((sum, row) => {
+                              const vid = row.id || row.combination;
+                              return sum + ((variantLocationStock[vid] || {})[loc.id] ?? 0);
+                            }, 0);
+                            return (
+                              <td key={loc.id} className="py-2 px-3 text-center font-semibold text-gray-700 text-xs">
+                                {locTotal}
+                              </td>
+                            );
+                          })}
+                          <td className="py-2 px-3 text-center font-bold text-gray-900 text-xs">
+                            {variantRows.reduce((sum, row) => {
+                              const vid = row.id || row.combination;
+                              return sum + locations.reduce((s, loc) => s + ((variantLocationStock[vid] || {})[loc.id] ?? 0), 0);
+                            }, 0)}
+                          </td>
+                          <td className="py-2 px-3"></td>
+                        </tr>
+                      </tfoot>
+                    )}
                   </table>
                 </div>
               )}
@@ -1495,6 +1995,28 @@ export default function ProductsidEditContent() {
           </div>
         </div>
       </div>
+
+      {/* ---- Toast Notification ---- */}
+      {toast && (
+        <div className="fixed top-6 right-6 z-[9999]">
+          <div
+            className={`flex items-center gap-3 rounded-lg border px-5 py-3.5 shadow-lg ${
+              toast.type === "success"
+                ? "border-green-200 bg-green-50 text-green-800"
+                : "border-red-200 bg-red-50 text-red-800"
+            }`}
+          >
+            <span className="text-lg">{toast.type === "success" ? "✓" : "✕"}</span>
+            <span className="text-sm font-medium">{toast.message}</span>
+            <button
+              onClick={() => { if (toastTimer.current) clearTimeout(toastTimer.current); setToast(null); }}
+              className="ml-2 text-current opacity-50 hover:opacity-100"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

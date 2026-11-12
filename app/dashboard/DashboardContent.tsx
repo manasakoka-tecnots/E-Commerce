@@ -14,6 +14,7 @@ type OrderItem = {
   seller_listing_id: string;
   quantity: number;
   price_at_purchase: number;
+  variant_title: string | null;
   seller_listings?: { product_id: string; products?: { name: string; brand: string | null } | null } | null;
 };
 
@@ -419,7 +420,7 @@ export default function DashboardContent() {
       if (prof?.id) {
         const { data: ordersData } = await supabase
           .from("orders")
-          .select("id, created_at, total_amount, status, order_items(id, seller_listing_id, quantity, price_at_purchase, seller_listings(product_id, products(name, brand))), fulfillments(id, status, tracking_number, carrier, tracking_url, shipped_at, delivered_at)")
+          .select("id, created_at, total_amount, status, order_items(id, seller_listing_id, quantity, price_at_purchase, variant_title, seller_listings(product_id, products(name, brand))), fulfillments(id, status, tracking_number, carrier, tracking_url, shipped_at, delivered_at)")
           .eq("profile_id", prof.id)
           .order("created_at", { ascending: false });
 
@@ -439,6 +440,7 @@ export default function DashboardContent() {
                 seller_listing_id: item.seller_listing_id as string,
                 quantity: item.quantity as number,
                 price_at_purchase: Number(item.price_at_purchase) || 0,
+                variant_title: (item.variant_title as string) || null,
                 seller_listings: listing ? { product_id: listing.product_id as string, products: product ?? null } : null,
               };
             }),
@@ -753,6 +755,11 @@ export default function DashboardContent() {
                                 <p className="font-bold text-slate-800">
                                   {item.seller_listings?.products?.name || "Product"}
                                 </p>
+                                {item.variant_title && (
+                                <p className="text-xs text-indigo-500 font-medium">
+                                  {item.variant_title}
+                                </p>
+                                )}
                                 {item.seller_listings?.products?.brand && (
                                 <p className="text-xs text-slate-400">
                                   {item.seller_listings?.products?.brand}

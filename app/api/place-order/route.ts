@@ -49,6 +49,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: data.error || "Failed to place order" }, { status: 403 });
     }
 
+    // Commit stock at location level (best-effort — doesn't block order)
+    try {
+      await supabase.rpc("commit_location_stock_for_order", {
+        p_order_id: data.order_id,
+      });
+    } catch (locErr) {
+      console.warn("Location stock commit (non-blocking):", locErr);
+    }
+
     return NextResponse.json({ order_id: data.order_id });
   } catch (err) {
     console.error("Place order error:", err);

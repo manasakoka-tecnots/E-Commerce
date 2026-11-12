@@ -184,6 +184,8 @@ export default function CheckoutContent() {
             seller_listing_id: item.product.sellerListingId,
             quantity: item.quantity,
             price_at_purchase: item.product.price,
+            variant_id: item.product.variantId || null,
+            variant_title: item.product.variantTitle || null,
           })),
         }),
       });

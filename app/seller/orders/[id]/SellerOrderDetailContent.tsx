@@ -42,6 +42,7 @@ type LineItem = {
   price: number;
   total: number;
   image_url: string | null;
+  variant_title: string | null;
 };
 
 type Fulfillment = {
@@ -54,7 +55,17 @@ type Fulfillment = {
   created_at: string;
   shipped_at: string | null;
   delivered_at: string | null;
+  location_id: string | null;
+  location_name: string | null;
   items: { order_item_id: string; quantity: number }[];
+};
+
+type SellerLocation = {
+  id: string;
+  name: string;
+  type: string;
+  is_default: boolean;
+  city: string | null;
 };
 
 /* ──────────────────────── Constants ──────────────────────── */
@@ -159,6 +170,8 @@ export default function SellerOrderDetailContent() {
   const [fulfillCarrier, setFulfillCarrier] = useState(CARRIERS[0]);
   const [fulfillTracking, setFulfillTracking] = useState("");
   const [fulfillNotes, setFulfillNotes] = useState("");
+  const [fulfillLocationId, setFulfillLocationId] = useState<string>("");
+  const [sellerLocations, setSellerLocations] = useState<SellerLocation[]>([]);
   const [creatingFulfillment, setCreatingFulfillment] = useState(false);
 
   // Compute unfulfilled quantities per order_item
@@ -324,7 +337,7 @@ export default function SellerOrderDetailContent() {
     const { data: items, error: itemsError } = await supabase
       .from("order_items")
       .select(`
-        id, seller_listing_id, quantity, price_at_purchase,
+        id, seller_listing_id, quantity, price_at_purchase, variant_id, variant_title,
         seller_listings!inner (
           product_id,
           products (name, brand, product_images (storage_path, is_representative, "order"))
@@ -384,36 +397,54 @@ export default function SellerOrderDetailContent() {
         price: Number(item.price_at_purchase),
         total: Number(item.price_at_purchase) * Number(item.quantity),
         image_url: imageUrl,
+        variant_title: (item as Record<string, unknown>).variant_title as string | null ?? null,
       };
     });
 
-    // Load fulfillments for this order + seller
+    // Load fulfillments for this order + seller (with location info)
     const { data: fulfillmentData } = await supabase
       .from("fulfillments")
       .select(`
         id, status, tracking_number, carrier, tracking_url, notes,
-        created_at, shipped_at, delivered_at,
+        created_at, shipped_at, delivered_at, location_id,
+        seller_locations (name),
         fulfillment_items (order_item_id, quantity)
       `)
       .eq("order_id", orderId)
       .eq("seller_id", seller.id)
       .order("created_at", { ascending: true });
 
-    const parsedFulfillments: Fulfillment[] = (fulfillmentData || []).map((f) => ({
-      id: f.id,
-      status: f.status,
-      tracking_number: f.tracking_number,
-      carrier: f.carrier,
-      tracking_url: f.tracking_url,
-      notes: f.notes,
-      created_at: f.created_at,
-      shipped_at: f.shipped_at,
-      delivered_at: f.delivered_at,
-      items: (f.fulfillment_items || []).map((fi: { order_item_id: string; quantity: number }) => ({
-        order_item_id: fi.order_item_id,
-        quantity: fi.quantity,
-      })),
-    }));
+    const parsedFulfillments: Fulfillment[] = (fulfillmentData || []).map((f) => {
+      const loc = (f as Record<string, unknown>).seller_locations as { name: string } | null;
+      return {
+        id: f.id,
+        status: f.status,
+        tracking_number: f.tracking_number,
+        carrier: f.carrier,
+        tracking_url: f.tracking_url,
+        notes: f.notes,
+        created_at: f.created_at,
+        shipped_at: f.shipped_at,
+        delivered_at: f.delivered_at,
+        location_id: (f as Record<string, unknown>).location_id as string | null,
+        location_name: loc?.name || null,
+        items: (f.fulfillment_items || []).map((fi: { order_item_id: string; quantity: number }) => ({
+          order_item_id: fi.order_item_id,
+          quantity: fi.quantity,
+        })),
+      };
+    });
+
+    // Load seller locations for fulfillment form
+    const { data: locData } = await supabase
+      .from("seller_locations")
+      .select("id, name, type, is_default, city")
+      .eq("seller_id", seller.id)
+      .eq("is_active", true)
+      .order("is_default", { ascending: false })
+      .order("fulfillment_priority", { ascending: true });
+
+    setSellerLocations(locData || []);
 
     setOrder(orderDetail);
     setLineItems(parsedItems);
@@ -519,6 +550,9 @@ export default function SellerOrderDetailContent() {
     setFulfillCarrier(CARRIERS[0]);
     setFulfillTracking("");
     setFulfillNotes("");
+    // Auto-select default location
+    const defaultLoc = sellerLocations.find((l) => l.is_default) || sellerLocations[0];
+    setFulfillLocationId(defaultLoc?.id || "");
     setShowFulfillForm(true);
   };
 
@@ -558,6 +592,7 @@ export default function SellerOrderDetailContent() {
         tracking_number: fulfillTracking.trim() || null,
         carrier: fulfillCarrier,
         notes: fulfillNotes.trim() || null,
+        location_id: fulfillLocationId || null,
       }),
     });
 
@@ -809,6 +844,9 @@ export default function SellerOrderDetailContent() {
                             <p className="text-xs font-semibold text-gray-900 truncate">
                               {item.product_name}
                             </p>
+                            {item.variant_title && (
+                              <p className="text-[10px] text-indigo-600 font-medium">{item.variant_title}</p>
+                            )}
                             <p className="text-[10px] text-gray-500">SKU: {item.sku}</p>
                           </div>
                           <div className="text-right">
@@ -847,6 +885,9 @@ export default function SellerOrderDetailContent() {
                             <p className="text-xs font-semibold text-gray-900 truncate">
                               {item.product_name}
                             </p>
+                            {item.variant_title && (
+                              <p className="text-[10px] text-indigo-600 font-medium">{item.variant_title}</p>
+                            )}
                             <p className="text-[10px] text-gray-500">
                               {item.unfulfilled} available to fulfill
                             </p>
@@ -891,6 +932,52 @@ export default function SellerOrderDetailContent() {
                         </div>
                       ))}
                     </div>
+
+                    {/* Fulfillment Location */}
+                    {sellerLocations.length > 0 && (
+                      <div className="px-6 py-4 border-t border-gray-200 bg-blue-50/30 space-y-2">
+                        <h4 className="text-xs font-bold text-gray-700">Fulfillment location</h4>
+                        <p className="text-[10px] text-gray-500">Choose which location will ship these items.</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                          {sellerLocations.map((loc) => (
+                            <button
+                              key={loc.id}
+                              type="button"
+                              onClick={() => setFulfillLocationId(loc.id)}
+                              className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition ${
+                                fulfillLocationId === loc.id
+                                  ? "border-indigo-400 bg-indigo-50 ring-1 ring-indigo-300"
+                                  : "border-gray-200 bg-white hover:border-gray-300"
+                              }`}
+                            >
+                              <span className={`flex h-6 w-6 items-center justify-center rounded-md text-[10px] font-bold ${
+                                loc.type === "warehouse" ? "bg-blue-100 text-blue-700" :
+                                loc.type === "store" ? "bg-green-100 text-green-700" :
+                                "bg-purple-100 text-purple-700"
+                              }`}>
+                                {loc.type === "warehouse" ? "W" : loc.type === "store" ? "S" : "F"}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-semibold text-gray-900 truncate">
+                                  {loc.name}
+                                  {loc.is_default && (
+                                    <span className="ml-1 text-[9px] font-medium text-indigo-500">(Default)</span>
+                                  )}
+                                </p>
+                                {loc.city && (
+                                  <p className="text-[10px] text-gray-500">{loc.city}</p>
+                                )}
+                              </div>
+                              {fulfillLocationId === loc.id && (
+                                <svg className="h-4 w-4 text-indigo-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                </svg>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Tracking info */}
                     <div className="px-6 py-4 border-t border-gray-200 bg-gray-50/50 space-y-4">
@@ -1031,9 +1118,14 @@ export default function SellerOrderDetailContent() {
                                     <span className="text-gray-300 text-lg">?</span>
                                   )}
                                 </div>
-                                <span className="font-semibold text-gray-900">
-                                  {item.product_name}
-                                </span>
+                                <div>
+                                  <span className="font-semibold text-gray-900">
+                                    {item.product_name}
+                                  </span>
+                                  {item.variant_title && (
+                                    <p className="text-[10px] text-indigo-600 font-medium mt-0.5">{item.variant_title}</p>
+                                  )}
+                                </div>
                               </div>
                             </td>
                             <td className="py-3.5 px-4 text-gray-500 font-mono">{item.sku}</td>
@@ -1299,6 +1391,20 @@ function FulfillmentCard({
           </div>
         ))}
       </div>
+
+      {/* Fulfillment location */}
+      {fulfillment.location_name && (
+        <div className="px-6 py-2 border-t border-gray-100 bg-blue-50/30">
+          <div className="flex items-center gap-2 text-xs">
+            <svg className="h-3.5 w-3.5 text-blue-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            <span className="text-gray-500">Shipped from:</span>
+            <span className="font-semibold text-gray-800">{fulfillment.location_name}</span>
+          </div>
+        </div>
+      )}
 
       {/* Tracking info */}
       {(fulfillment.tracking_number || fulfillment.carrier) && (

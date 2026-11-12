@@ -35,7 +35,7 @@ export default function StorePreferencesContent() {
   useEffect(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) setPrefs(JSON.parse(stored));
+      if (stored) setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(stored) });
     } catch {
       /* ignore */
     }

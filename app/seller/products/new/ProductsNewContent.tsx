@@ -20,9 +20,17 @@ type VariantOption = {
 type VariantRow = {
   combination: string;
   sku: string;
+  barcode: string;
   price: string;
   stock: string;
   available: boolean;
+};
+
+type SellerLocation = {
+  id: string;
+  name: string;
+  type: string;
+  is_default: boolean;
 };
 
 type ImagePreview = {
@@ -150,6 +158,10 @@ export default function ProductsNewContent() {
   const [images, setImages] = useState<ImagePreview[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  /* Locations & per-location stock */
+  const [locations, setLocations] = useState<SellerLocation[]>([]);
+  const [locationStock, setLocationStock] = useState<Record<string, number>>({});
+
   /* Variants */
   const [variantOptions, setVariantOptions] = useState<VariantOption[]>([]);
   const [variantRows, setVariantRows] = useState<VariantRow[]>([]);
@@ -158,6 +170,14 @@ export default function ProductsNewContent() {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = useCallback((message: string, type: "success" | "error") => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ message, type });
+    toastTimer.current = setTimeout(() => setToast(null), 4000);
+  }, []);
 
   /* ---- field helpers ---- */
   const set = useCallback(
@@ -230,6 +250,20 @@ export default function ProductsNewContent() {
       }
 
       setSellerId(seller.id);
+
+      /* Load seller locations */
+      const { data: locs } = await supabase
+        .from("seller_locations")
+        .select("id, name, type, is_default")
+        .eq("seller_id", seller.id)
+        .eq("is_active", true)
+        .order("fulfillment_priority", { ascending: true });
+      if (locs && locs.length > 0) {
+        setLocations(locs);
+        const stockMap: Record<string, number> = {};
+        locs.forEach((loc) => { stockMap[loc.id] = 0; });
+        setLocationStock(stockMap);
+      }
 
       const { data: cats } = await supabase
         .from("categories")
@@ -368,6 +402,7 @@ export default function ProductsNewContent() {
           existing ?? {
             combination,
             sku: "",
+            barcode: "",
             price: "",
             stock: "",
             available: true,
@@ -419,8 +454,13 @@ export default function ProductsNewContent() {
     if (isNaN(price) || price < 0) errs.push("Valid selling price is required.");
     if (form.compareAtPrice && parseFloat(form.compareAtPrice) < 0) errs.push("Compare-at price cannot be negative.");
     if (form.costPerItem && parseFloat(form.costPerItem) < 0) errs.push("Cost per item cannot be negative.");
-    const stock = parseInt(form.stock, 10);
-    if (isNaN(stock) || stock < 0) errs.push("Available stock is required (>= 0).");
+    if (locations.length > 0) {
+      const totalLocStock = Object.values(locationStock).reduce((s, v) => s + v, 0);
+      if (totalLocStock < 0) errs.push("Stock cannot be negative.");
+    } else {
+      const stock = parseInt(form.stock, 10);
+      if (isNaN(stock) || stock < 0) errs.push("Available stock is required (>= 0).");
+    }
     if (!form.categoryId) errs.push("Please select a category.");
     return errs;
   };
@@ -429,6 +469,7 @@ export default function ProductsNewContent() {
     const validationErrors = validate();
     if (validationErrors.length) {
       setErrors(validationErrors);
+      showToast(validationErrors[0], "error");
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
@@ -455,6 +496,7 @@ export default function ProductsNewContent() {
 
       if (productError || !newProduct) {
         setErrors([`Failed to create product: ${productError?.message ?? "Unknown error"}`]);
+        showToast(`Failed to create product: ${productError?.message ?? "Unknown error"}`, "error");
         setSubmitting(false);
         return;
       }
@@ -501,6 +543,7 @@ export default function ProductsNewContent() {
             product_id: productId,
             title: v.combination,
             sku: v.sku || null,
+            barcode: v.barcode || null,
             price: v.price ? parseFloat(v.price) : null,
             stock: v.stock ? parseInt(v.stock, 10) : 0,
             is_available: v.available,
@@ -515,13 +558,14 @@ export default function ProductsNewContent() {
         const { error: variantError } = await supabase.from("product_variants").insert(variantInserts);
         if (variantError) {
           setErrors([`Product created but variants failed: ${variantError.message}`]);
+          showToast(`Product created but variants failed: ${variantError.message}`, "error");
           setSubmitting(false);
           return;
         }
       }
 
       /* 4. Create seller listing */
-      const { error: listingError } = await supabase
+      const { data: newListing, error: listingError } = await supabase
         .from("seller_listings")
         .insert({
           seller_id: sellerId,
@@ -540,18 +584,42 @@ export default function ProductsNewContent() {
                   .join(". "),
               }
             : null,
-        });
+        })
+        .select("id")
+        .single();
 
-      if (listingError) {
-        setErrors([`Product created but listing failed: ${listingError.message}`]);
+      if (listingError || !newListing) {
+        setErrors([`Product created but listing failed: ${listingError?.message ?? "Unknown error"}`]);
+        showToast(`Product created but listing failed: ${listingError?.message ?? "Unknown error"}`, "error");
         setSubmitting(false);
         return;
       }
 
+      /* 5. Create per-location inventory via RPC (atomic, SECURITY DEFINER) */
+      if (locations.length > 0) {
+        for (const loc of locations) {
+          const qty = locationStock[loc.id] ?? 0;
+          const { error: rpcErr } = await supabase.rpc("adjust_location_inventory", {
+            p_location_id: loc.id,
+            p_listing_id: newListing.id,
+            p_adjustment_type: "set",
+            p_quantity_change: qty,
+            p_reason: "New product creation",
+          });
+          if (rpcErr) {
+            console.error("adjust_location_inventory RPC error:", rpcErr);
+          }
+        }
+      }
+
+      /* 6. Stock sync is handled by the RPC automatically */
+
       setSuccess("Product created successfully!");
+      showToast("Product created successfully!", "success");
       setTimeout(() => router.push("/seller/products"), 1500);
     } catch (err) {
       setErrors([err instanceof Error ? err.message : "An unexpected error occurred."]);
+      showToast(err instanceof Error ? err.message : "An unexpected error occurred.", "error");
     } finally {
       setSubmitting(false);
     }
@@ -985,34 +1053,94 @@ export default function ProductsNewContent() {
                 </label>
 
                 {form.trackQuantity && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 block mb-1">
-                        Available stock <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={form.stock}
-                        onChange={(e) => set("stock", e.target.value)}
-                        placeholder="0"
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 block mb-1">
-                        Low stock threshold
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={form.lowStockThreshold}
-                        onChange={(e) => set("lowStockThreshold", e.target.value)}
-                        placeholder="5"
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none"
-                      />
+                  <div className="mt-3 space-y-4">
+                    {locations.length > 0 ? (
+                      <>
+                        <div className="border border-gray-200 rounded-lg overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="text-left px-4 py-2.5 font-medium text-gray-700">Location</th>
+                                <th className="text-right px-4 py-2.5 font-medium text-gray-700 w-32">Available</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {locations.map((loc) => (
+                                <tr key={loc.id} className="hover:bg-gray-50/50">
+                                  <td className="px-4 py-2.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-gray-900">{loc.name}</span>
+                                      {loc.is_default && (
+                                        <span className="text-[10px] font-medium bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">Default</span>
+                                      )}
+                                      <span className="text-[10px] text-gray-400 capitalize">{loc.type.replace("_", " ")}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-2.5">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      value={locationStock[loc.id] ?? 0}
+                                      onChange={(e) => {
+                                        const val = Math.max(0, parseInt(e.target.value) || 0);
+                                        setLocationStock((prev) => ({ ...prev, [loc.id]: val }));
+                                        const total = Object.entries({ ...locationStock, [loc.id]: val })
+                                          .reduce((sum, [, v]) => sum + v, 0);
+                                        set("stock", String(total));
+                                      }}
+                                      placeholder="0"
+                                      className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-right focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none"
+                                    />
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot className="bg-gray-50 border-t border-gray-200">
+                              <tr>
+                                <td className="px-4 py-2.5 font-medium text-gray-900">Total</td>
+                                <td className="px-4 py-2.5 text-right font-semibold text-gray-900">
+                                  {Object.values(locationStock).reduce((sum, v) => sum + v, 0)}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          Set stock for each location. The total is saved as the product&apos;s available stock.
+                        </p>
+                      </>
+                    ) : (
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 block mb-1">
+                          Available stock <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={form.stock}
+                          onChange={(e) => set("stock", e.target.value)}
+                          placeholder="0"
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none"
+                        />
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 block mb-1">
+                          Low stock threshold
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={form.lowStockThreshold}
+                          onChange={(e) => set("lowStockThreshold", e.target.value)}
+                          placeholder="5"
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1287,6 +1415,7 @@ export default function ProductsNewContent() {
                       <tr>
                         <th className="py-2 px-3">Variant</th>
                         <th className="py-2 px-3">SKU</th>
+                        <th className="py-2 px-3">Barcode</th>
                         <th className="py-2 px-3">Price override (INR)</th>
                         <th className="py-2 px-3">Stock</th>
                         <th className="py-2 px-3">Available</th>
@@ -1301,7 +1430,7 @@ export default function ProductsNewContent() {
                           <td className="py-2 px-3">
                             <input
                               type="text"
-                              value={row.sku}
+                              value={row.sku || ""}
                               onChange={(e) =>
                                 updateVariantRow(i, "sku", e.target.value)
                               }
@@ -1310,10 +1439,21 @@ export default function ProductsNewContent() {
                           </td>
                           <td className="py-2 px-3">
                             <input
+                              type="text"
+                              value={row.barcode || ""}
+                              onChange={(e) =>
+                                updateVariantRow(i, "barcode", e.target.value)
+                              }
+                              placeholder="UPC, EAN..."
+                              className="w-28 rounded border border-gray-300 px-2 py-1 text-xs focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
+                            <input
                               type="number"
                               min="0"
                               step="0.01"
-                              value={row.price}
+                              value={row.price ?? ""}
                               onChange={(e) =>
                                 updateVariantRow(i, "price", e.target.value)
                               }
@@ -1326,7 +1466,7 @@ export default function ProductsNewContent() {
                               type="number"
                               min="0"
                               step="1"
-                              value={row.stock}
+                              value={row.stock ?? ""}
                               onChange={(e) =>
                                 updateVariantRow(i, "stock", e.target.value)
                               }
@@ -1554,6 +1694,16 @@ export default function ProductsNewContent() {
           </div>
         </div>
       </div>
+
+      {toast && (
+        <div className="fixed top-6 right-6 z-[9999]">
+          <div className={`flex items-center gap-3 rounded-lg border px-5 py-3.5 shadow-lg ${toast.type === "success" ? "border-green-200 bg-green-50 text-green-800" : "border-red-200 bg-red-50 text-red-800"}`}>
+            <span className="text-lg">{toast.type === "success" ? "✓" : "✕"}</span>
+            <span className="text-sm font-medium">{toast.message}</span>
+            <button onClick={() => { if (toastTimer.current) clearTimeout(toastTimer.current); setToast(null); }} className="ml-2 text-current opacity-50 hover:opacity-100">✕</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

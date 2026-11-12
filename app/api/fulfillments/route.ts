@@ -19,11 +19,30 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = getUserSupabase(userJwt);
+
+    // Verify the authenticated user owns this seller account
+    const { data: authUser } = await supabase.auth.getUser();
+    if (!authUser?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await req.json();
-    const { order_id, seller_id, items, tracking_number, carrier, notes } = body;
+    const { order_id, seller_id, items, tracking_number, carrier, notes, location_id } = body;
 
     if (!order_id || !seller_id || !items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: "Missing required fields: order_id, seller_id, items" }, { status: 400 });
+    }
+
+    // Verify seller_id belongs to authenticated user
+    const { data: sellerCheck } = await supabase
+      .from("sellers")
+      .select("id")
+      .eq("id", seller_id)
+      .eq("profile_id", (await supabase.from("profiles").select("id").eq("auth_uid", authUser.user.id).single()).data?.id)
+      .single();
+
+    if (!sellerCheck) {
+      return NextResponse.json({ error: "Forbidden: seller does not belong to current user" }, { status: 403 });
     }
 
     for (const item of items) {
@@ -40,6 +59,7 @@ export async function POST(req: NextRequest) {
       p_carrier: carrier || null,
       p_notes: notes || null,
       p_items: items,
+      p_location_id: location_id || null,
     });
 
     if (error) {
@@ -51,7 +71,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: data.error }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, fulfillment_id: data.fulfillment_id });
+    return NextResponse.json({ success: true, fulfillment_id: data.fulfillment_id, location_id: data.location_id });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }

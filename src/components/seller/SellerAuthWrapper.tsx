@@ -33,13 +33,20 @@ export default function SellerAuthWrapper({
     let active = true;
 
     const checkSellerAuth = async () => {
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (!active) return;
+      // Use getSession() first (local, fast) then validate with getUser()
+      const { data: { session } } = await supabase.auth.getSession();
+      let user = session?.user ?? null;
 
-      if (userError || !user) {
-        router.replace(`/auth/login?redirect=${encodeURIComponent(pathname)}`);
-        return;
+      if (!user) {
+        // Session not in local storage — try server validation
+        const { data: { user: serverUser }, error: userError } = await supabase.auth.getUser();
+        if (userError || !serverUser) {
+          if (active) router.replace(`/auth/login?redirect=${encodeURIComponent(pathname)}`);
+          return;
+        }
+        user = serverUser;
       }
+      if (!active) return;
 
       const { data: profile } = await supabase
         .from("profiles")

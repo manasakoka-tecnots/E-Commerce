@@ -179,9 +179,15 @@ const menuItems: MenuItem[] = [
       { label: "All Products", href: "/seller/products" },
       { label: "Collections", href: "/seller/products/collections" },
       { label: "Inventory", href: "/seller/products/inventory" },
+      { label: "Transfers", href: "/seller/transfers" },
       { label: "Gift Cards", href: "/seller/products/gift-cards" },
       { label: "Price Lists", href: "/seller/products/price-lists" },
     ],
+  },
+  {
+    label: "Locations",
+    href: "/seller/locations",
+    icon: icons.store,
   },
   {
     label: "Brands",

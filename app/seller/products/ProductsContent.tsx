@@ -59,6 +59,36 @@ export default function ProductsContent() {
       return;
     }
 
+    /* Fetch real stock from location_inventory (per-variant per-location) */
+    const listingIds = (listings ?? []).map((l: { id: string }) => l.id);
+    const { data: locInv } = listingIds.length
+      ? await supabase
+          .from("location_inventory")
+          .select("listing_id, variant_id, available")
+          .in("listing_id", listingIds)
+      : { data: [] };
+
+    /* Also fetch variant-level stock as fallback */
+    const productIds = (listings ?? []).map((l: { product_id: string }) => l.product_id);
+    const { data: variants } = productIds.length
+      ? await supabase
+          .from("product_variants")
+          .select("id, product_id, stock")
+          .in("product_id", productIds)
+      : { data: [] };
+
+    /* Build stock lookup: listing_id → total available across all locations & variants */
+    const stockByListing: Record<string, number> = {};
+    for (const inv of locInv ?? []) {
+      stockByListing[inv.listing_id] = (stockByListing[inv.listing_id] || 0) + (Number(inv.available) || 0);
+    }
+
+    /* Build variant stock lookup: product_id → sum of variant stocks */
+    const variantStockByProduct: Record<string, number> = {};
+    for (const v of variants ?? []) {
+      variantStockByProduct[v.product_id] = (variantStockByProduct[v.product_id] || 0) + (Number(v.stock) || 0);
+    }
+
     const productItems: ProductListing[] = [];
 
     for (const listing of listings ?? []) {
@@ -81,11 +111,21 @@ export default function ProductsContent() {
         imagePath = imgData.storage_path;
       }
 
+      /* Stock priority: location_inventory sum > variant stock sum > seller_listings.stock */
+      let totalStock: number;
+      if (stockByListing[listing.id] !== undefined) {
+        totalStock = stockByListing[listing.id];
+      } else if (variantStockByProduct[listing.product_id] !== undefined) {
+        totalStock = variantStockByProduct[listing.product_id];
+      } else {
+        totalStock = Number(listing.stock) || 0;
+      }
+
       productItems.push({
         id: listing.id,
         product_id: listing.product_id,
         price: Number(listing.price) || 0,
-        stock: Number(listing.stock) || 0,
+        stock: totalStock,
         status: listing.status,
         created_at: listing.created_at,
         product: prod
@@ -513,7 +553,7 @@ export default function ProductsContent() {
                                     : "text-gray-700"
                                 }`}
                               >
-                                {item.stock}
+                                {item.stock} in stock
                               </span>
                             </td>
                             <td className="py-3 px-4">
