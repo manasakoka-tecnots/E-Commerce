@@ -323,6 +323,7 @@ export default function Navbar() {
   };
 
   const handleSignOut = async () => {
+    try { sessionStorage.removeItem("shopora_role_cache"); } catch { /* ignore */ }
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error("Could not sign out:", error.message);

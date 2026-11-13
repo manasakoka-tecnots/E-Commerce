@@ -9,20 +9,56 @@ function getUserSupabase(jwt: string) {
   );
 }
 
+async function getAuthenticatedUserAndProfile(req: NextRequest) {
+  const authHeader = req.headers.get("authorization");
+  const userJwt = authHeader?.startsWith("Bearer ") ? authHeader.split(" ")[1] : undefined;
+  if (!userJwt) return null;
+
+  const supabase = getUserSupabase(userJwt);
+  const { data: authUser } = await supabase.auth.getUser();
+  if (!authUser?.user) return null;
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("auth_uid", authUser.user.id)
+    .maybeSingle();
+
+  if (!profile) return null;
+
+  return { supabase, user: authUser.user, profileId: profile.id };
+}
+
+async function verifySellerOrStaff(
+  supabase: ReturnType<typeof getUserSupabase>,
+  profileId: string,
+  sellerId: string
+): Promise<boolean> {
+  const { data: sellerCheck } = await supabase
+    .from("sellers")
+    .select("id")
+    .eq("id", sellerId)
+    .eq("profile_id", profileId)
+    .maybeSingle();
+
+  if (sellerCheck) return true;
+
+  const { data: staffCheck } = await supabase
+    .from("seller_staff")
+    .select("id")
+    .eq("seller_id", sellerId)
+    .eq("profile_id", profileId)
+    .eq("status", "active")
+    .maybeSingle();
+
+  return !!staffCheck;
+}
+
 // POST: Create a fulfillment
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization");
-    const userJwt = authHeader?.startsWith("Bearer ") ? authHeader.split(" ")[1] : undefined;
-    if (!userJwt) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const supabase = getUserSupabase(userJwt);
-
-    // Verify the authenticated user owns this seller account
-    const { data: authUser } = await supabase.auth.getUser();
-    if (!authUser?.user) {
+    const auth = await getAuthenticatedUserAndProfile(req);
+    if (!auth) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -33,15 +69,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required fields: order_id, seller_id, items" }, { status: 400 });
     }
 
-    // Verify seller_id belongs to authenticated user
-    const { data: sellerCheck } = await supabase
-      .from("sellers")
-      .select("id")
-      .eq("id", seller_id)
-      .eq("profile_id", (await supabase.from("profiles").select("id").eq("auth_uid", authUser.user.id).single()).data?.id)
-      .single();
-
-    if (!sellerCheck) {
+    const isAuthorized = await verifySellerOrStaff(auth.supabase, auth.profileId, seller_id);
+    if (!isAuthorized) {
       return NextResponse.json({ error: "Forbidden: seller does not belong to current user" }, { status: 403 });
     }
 
@@ -51,8 +80,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Use SECURITY DEFINER RPC to create fulfillment (bypasses RLS)
-    const { data, error } = await supabase.rpc("create_fulfillment_rpc", {
+    const { data, error } = await auth.supabase.rpc("create_fulfillment_rpc", {
       p_order_id: order_id,
       p_seller_id: seller_id,
       p_tracking_number: tracking_number || null,
@@ -80,18 +108,32 @@ export async function POST(req: NextRequest) {
 // PATCH: Update a fulfillment (tracking, status)
 export async function PATCH(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization");
-    const userJwt = authHeader?.startsWith("Bearer ") ? authHeader.split(" ")[1] : undefined;
-    if (!userJwt) {
+    const auth = await getAuthenticatedUserAndProfile(req);
+    if (!auth) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = getUserSupabase(userJwt);
     const body = await req.json();
     const { fulfillment_id, status } = body;
 
     if (!fulfillment_id) {
       return NextResponse.json({ error: "Missing fulfillment_id" }, { status: 400 });
+    }
+
+    // Verify the caller owns the fulfillment's seller
+    const { data: fulfillment } = await auth.supabase
+      .from("fulfillments")
+      .select("seller_id")
+      .eq("id", fulfillment_id)
+      .maybeSingle();
+
+    if (!fulfillment) {
+      return NextResponse.json({ error: "Fulfillment not found" }, { status: 404 });
+    }
+
+    const isAuthorized = await verifySellerOrStaff(auth.supabase, auth.profileId, fulfillment.seller_id);
+    if (!isAuthorized) {
+      return NextResponse.json({ error: "Not authorized for this fulfillment" }, { status: 403 });
     }
 
     if (status) {
@@ -100,8 +142,7 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({ error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` }, { status: 400 });
       }
 
-      // Use SECURITY DEFINER RPC to update fulfillment status (bypasses RLS)
-      const { data, error } = await supabase.rpc("update_fulfillment_status_rpc", {
+      const { data, error } = await auth.supabase.rpc("update_fulfillment_status_rpc", {
         p_fulfillment_id: fulfillment_id,
         p_status: status,
       });
@@ -125,13 +166,11 @@ export async function PATCH(req: NextRequest) {
 // DELETE: Cancel a fulfillment
 export async function DELETE(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization");
-    const userJwt = authHeader?.startsWith("Bearer ") ? authHeader.split(" ")[1] : undefined;
-    if (!userJwt) {
+    const auth = await getAuthenticatedUserAndProfile(req);
+    if (!auth) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = getUserSupabase(userJwt);
     const { searchParams } = new URL(req.url);
     const fulfillment_id = searchParams.get("fulfillment_id");
 
@@ -139,8 +178,23 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "Missing fulfillment_id" }, { status: 400 });
     }
 
-    // Use SECURITY DEFINER RPC to cancel fulfillment (bypasses RLS)
-    const { data, error } = await supabase.rpc("cancel_fulfillment_rpc", {
+    // Verify the caller owns the fulfillment's seller
+    const { data: fulfillment } = await auth.supabase
+      .from("fulfillments")
+      .select("seller_id")
+      .eq("id", fulfillment_id)
+      .maybeSingle();
+
+    if (!fulfillment) {
+      return NextResponse.json({ error: "Fulfillment not found" }, { status: 404 });
+    }
+
+    const isAuthorized = await verifySellerOrStaff(auth.supabase, auth.profileId, fulfillment.seller_id);
+    if (!isAuthorized) {
+      return NextResponse.json({ error: "Not authorized for this fulfillment" }, { status: 403 });
+    }
+
+    const { data, error } = await auth.supabase.rpc("cancel_fulfillment_rpc", {
       p_fulfillment_id: fulfillment_id,
     });
 

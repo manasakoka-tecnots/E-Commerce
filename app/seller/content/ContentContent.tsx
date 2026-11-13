@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 import Spinner from "@/src/components/Spinner";
 
 type SellerFile = {
@@ -40,8 +41,10 @@ export default function ContentContent() {
   const [success, setSuccess] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { sellerId: staffSellerId } = useStaff();
 
   const getSellerId = useCallback(async () => {
+    if (staffSellerId) return staffSellerId;
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) return null;
     const { data: profile } = await supabase
@@ -57,7 +60,7 @@ export default function ContentContent() {
       .eq("status", "approved")
       .maybeSingle();
     return seller?.id ?? null;
-  }, []);
+  }, [staffSellerId]);
 
   const loadFiles = useCallback(async () => {
     setLoading(true);

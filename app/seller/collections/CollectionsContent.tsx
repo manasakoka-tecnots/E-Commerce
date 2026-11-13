@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 import Spinner from "@/src/components/Spinner";
 import Pagination, { usePagination } from "@/src/components/Pagination";
 
@@ -33,6 +34,7 @@ export default function CollectionsContent() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const { sellerId: staffSellerId } = useStaff();
 
   // Form
   const [title, setTitle] = useState("");
@@ -42,6 +44,7 @@ export default function CollectionsContent() {
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
 
   const getSellerId = useCallback(async () => {
+    if (staffSellerId) return staffSellerId;
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) return null;
     // Look up seller via profiles table (matches RLS function get_seller_id_for_user)
@@ -58,7 +61,7 @@ export default function CollectionsContent() {
       .eq("status", "approved")
       .maybeSingle();
     return seller?.id ?? null;
-  }, []);
+  }, [staffSellerId]);
 
   const loadCollections = useCallback(async () => {
     setLoading(true);

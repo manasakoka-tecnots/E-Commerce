@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useStaff } from "@/src/context/StaffContext";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -268,6 +269,7 @@ const menuItems: MenuItem[] = [
       { label: "Payments", href: "/seller/settings/payments" },
       { label: "Shipping", href: "/seller/settings/shipping" },
       { label: "Notifications", href: "/seller/settings/notifications" },
+      { label: "Staff", href: "/seller/settings/staff" },
       { label: "Account", href: "/seller/settings/account" },
     ],
   },
@@ -279,16 +281,72 @@ const menuItems: MenuItem[] = [
 
 const STORAGE_KEY = "shopora-seller-sidebar-collapsed";
 
+// Map sidebar labels to the permissions required to see them
+// "Home" is always visible for all staff
+const LABEL_PERMISSION_MAP: Record<string, string | null> = {
+  Home: null, // always visible
+  Orders: "orders_view",
+  Products: null, // always visible if staff has any product/inventory permission
+  Locations: "locations_manage",
+  Customers: null, // managers and above
+  Finances: "finances_view",
+  Analytics: "finances_view",
+  Settings: null, // owner/admin only
+};
+
+// Sub-items that require specific permissions
+const SUBITEM_PERMISSION_MAP: Record<string, string> = {
+  Inventory: "inventory_view",
+  Transfers: "transfers_create",
+  Collections: "products_manage",
+  "Gift Cards": "products_manage",
+  "Price Lists": "products_manage",
+};
+
 export default function SellerSidebar({
   storeName = "My Store",
   userInitials = "S",
 }: SellerSidebarProps) {
   const pathname = usePathname();
+  const { isStaff, isOwner, staffRole, hasAnyPermission } = useStaff();
   const [collapsed, setCollapsed] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set()
   );
   const [mounted, setMounted] = useState(false);
+
+  // Filter menu items based on staff permissions (Shopify-style)
+  const visibleMenuItems = useMemo(() => {
+    if (!isStaff || isOwner) return menuItems; // Owner sees everything
+    if (staffRole === "admin") return menuItems; // Admin staff sees everything
+
+    return menuItems
+      .filter((item) => {
+        // Home is always visible
+        if (item.label === "Home") return true;
+        // Products is always visible for staff (they need to at least browse)
+        if (item.label === "Products") return true;
+        // Orders: check permission
+        if (item.label === "Orders") return hasAnyPermission("orders_view");
+        // Locations: managers and above
+        if (item.label === "Locations") return staffRole === "manager";
+        // Customers: managers and above
+        if (item.label === "Customers") return staffRole === "manager";
+        // Finances, Analytics, Content, Marketing, Discounts, Brands, Categories, Online Store, Settings:
+        // Only admin/owner (already filtered above)
+        return false;
+      })
+      .map((item) => {
+        // Filter sub-items based on permissions
+        if (!item.subItems) return item;
+        const filteredSubs = item.subItems.filter((sub) => {
+          const requiredPerm = SUBITEM_PERMISSION_MAP[sub.label];
+          if (!requiredPerm) return true; // No permission required
+          return hasAnyPermission(requiredPerm);
+        });
+        return { ...item, subItems: filteredSubs };
+      });
+  }, [isStaff, isOwner, staffRole, hasAnyPermission]);
 
   /* Hydrate collapsed state from localStorage */
   useEffect(() => {
@@ -304,7 +362,7 @@ export default function SellerSidebar({
   /* Auto-expand section containing the active route */
   useEffect(() => {
     if (!pathname) return;
-    const active = menuItems.find(
+    const active = visibleMenuItems.find(
       (item) =>
         item.subItems &&
         (pathname === item.href ||
@@ -378,7 +436,7 @@ export default function SellerSidebar({
       {/* ---- Scrollable nav ---- */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 scrollbar-thin scrollbar-thumb-gray-300">
         <ul className="flex flex-col gap-0.5 px-2">
-          {menuItems.map((item) => {
+          {visibleMenuItems.map((item) => {
             const sectionActive = isSectionActive(item);
             const expanded = expandedSections.has(item.label);
             const hasChildren = !!item.subItems?.length;

@@ -408,6 +408,18 @@ export default function DashboardContent() {
         return;
       }
 
+      // Check if user is staff/seller — redirect to seller dashboard
+      try {
+        const cachedRole = sessionStorage.getItem("shopora_role_cache");
+        if (cachedRole) {
+          const parsed = JSON.parse(cachedRole);
+          if (parsed.role === "seller" || parsed.role === "staff") {
+            router.replace("/seller/dashboard");
+            return;
+          }
+        }
+      } catch { /* ignore */ }
+
       const { data: prof } = await supabase
         .from("profiles")
         .select("id, email, full_name, role")
@@ -573,6 +585,7 @@ export default function DashboardContent() {
   };
 
   const handleSignOut = async () => {
+    try { sessionStorage.removeItem("shopora_role_cache"); } catch { /* ignore */ }
     await supabase.auth.signOut();
     router.replace("/");
   };

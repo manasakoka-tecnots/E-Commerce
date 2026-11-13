@@ -26,6 +26,10 @@ export default function AuthRegisterContent() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
+  // Support redirect param (e.g., from staff invite page)
+  const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const redirectTo = searchParams?.get("redirect") ?? "";
+
   const { register, handleSubmit, formState: { errors } } = useForm<RegisterForm>({ resolver: zodResolver(registerSchema) });
 
   const onSubmit = async (data: RegisterForm) => {
@@ -39,7 +43,9 @@ export default function AuthRegisterContent() {
         data: {
           full_name: data.fullName,
         },
-        emailRedirectTo: `${siteUrl}/auth/callback`,
+        emailRedirectTo: redirectTo
+          ? `${siteUrl}/auth/callback?next=${encodeURIComponent(redirectTo)}`
+          : `${siteUrl}/auth/callback`,
       },
     });
     if (error) {
@@ -71,7 +77,7 @@ export default function AuthRegisterContent() {
             </p>
           </div>
           <Link
-            href="/auth/login"
+            href={redirectTo ? `/auth/login?redirect=${encodeURIComponent(redirectTo)}` : "/auth/login"}
             className="inline-block bg-[#ff3f6c] px-10 py-3.5 text-sm font-bold uppercase tracking-wider text-white transition hover:bg-[#e5355f]"
           >
             Go to Login

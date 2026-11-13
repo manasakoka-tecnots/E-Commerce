@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/src/lib/supabase/client";
 import Spinner from "@/src/components/Spinner";
 import Pagination, { usePagination } from "@/src/components/Pagination";
+import { useStaff } from "@/src/context/StaffContext";
 
 type OrderRow = {
   id: string;
@@ -64,6 +65,7 @@ const formatDate = (iso: string) =>
 
 export default function OrdersContent() {
   const router = useRouter();
+  const { sellerId: staffSellerId, isStaff, isOwner, assignedLocationIds } = useStaff();
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -86,33 +88,35 @@ export default function OrdersContent() {
       return;
     }
 
-    // Step 2: Get profile
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("id, role")
-      .eq("auth_uid", userData.user.id)
-      .maybeSingle();
-
-    if (profileError || !profile) {
-      setErrorMessage("Could not load your account profile.");
-      setLoading(false);
-      return;
+    // Step 2: Resolve seller ID — use staff context or detect via API
+    let resolvedSellerId = staffSellerId;
+    if (!resolvedSellerId) {
+      const { data: session } = await supabase.auth.getSession();
+      if (session?.session?.access_token) {
+        try {
+          const res = await fetch("/api/auth/detect-role", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.session.access_token}`,
+            },
+          });
+          const roleData = await res.json();
+          resolvedSellerId = roleData.sellerId || null;
+        } catch {
+          // Fall back to direct query
+        }
+      }
+      if (!resolvedSellerId) {
+        const { data: seller } = await supabase
+          .from("sellers")
+          .select("id")
+          .eq("profile_id", userData.user.id)
+          .maybeSingle();
+        resolvedSellerId = seller?.id ?? null;
+      }
     }
-
-    if (profile.role !== "seller" && profile.role !== "admin") {
-      setErrorMessage("You do not have seller permissions.");
-      setLoading(false);
-      return;
-    }
-
-    // Step 3: Get seller record
-    const { data: seller, error: sellerError } = await supabase
-      .from("sellers")
-      .select("id")
-      .eq("profile_id", profile.id)
-      .maybeSingle();
-
-    if (sellerError || !seller) {
+    if (!resolvedSellerId) {
       setErrorMessage("Seller account not found.");
       setLoading(false);
       return;
@@ -122,7 +126,7 @@ export default function OrdersContent() {
     const { data: listings, error: listingsError } = await supabase
       .from("seller_listings")
       .select("id")
-      .eq("seller_id", seller.id);
+      .eq("seller_id", resolvedSellerId);
 
     if (listingsError) {
       setErrorMessage(`Could not load listings: ${listingsError.message}`);
@@ -220,13 +224,35 @@ export default function OrdersContent() {
       }
     }
 
-    // Fetch fulfillment data for all orders in one query
+    // Fetch fulfillment data for all orders in one query (include location_id for staff filtering)
     const orderIds = Array.from(orderMap.keys());
     const { data: fulfillmentData } = await supabase
       .from("fulfillments")
-      .select("order_id, status, fulfillment_items(order_item_id, quantity)")
-      .eq("seller_id", seller.id)
+      .select("order_id, status, location_id, fulfillment_items(order_item_id, quantity)")
+      .eq("seller_id", resolvedSellerId)
       .in("order_id", orderIds);
+
+    // Staff location filtering: only show orders with fulfillments at staff's assigned locations
+    // or unfulfilled orders (which staff at any location can potentially fulfill)
+    let staffVisibleOrderIds: Set<string> | null = null;
+    if (isStaff && assignedLocationIds.length > 0) {
+      staffVisibleOrderIds = new Set<string>();
+      const assignedSet = new Set(assignedLocationIds);
+      for (const oid of orderIds) {
+        const orderFulfs = (fulfillmentData || []).filter((f) => f.order_id === oid && f.status !== "cancelled");
+        if (orderFulfs.length === 0) {
+          // Unfulfilled order — show to all staff so they can fulfill from their location
+          staffVisibleOrderIds.add(oid);
+        } else if (orderFulfs.some((f) => f.location_id && assignedSet.has(f.location_id))) {
+          // Has fulfillment at one of staff's locations
+          staffVisibleOrderIds.add(oid);
+        }
+      }
+      // Remove orders not visible to this staff
+      for (const oid of orderIds) {
+        if (!staffVisibleOrderIds.has(oid)) orderMap.delete(oid);
+      }
+    }
 
     // Compute fulfillment status per order
     const fulfillmentStatusMap = new Map<string, "unfulfilled" | "partially_fulfilled" | "fulfilled">();
@@ -299,7 +325,7 @@ export default function OrdersContent() {
 
     setOrders(rows);
     setLoading(false);
-  }, []);
+  }, [staffSellerId, isStaff, assignedLocationIds]);
 
   useEffect(() => {
     void loadOrders();

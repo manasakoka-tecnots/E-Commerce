@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/src/lib/supabase/client";
 import Spinner from "@/src/components/Spinner";
+import { useStaff } from "@/src/context/StaffContext";
 
 type LocationType = "warehouse" | "store" | "fulfillment_center";
 
@@ -91,6 +92,7 @@ const emptyForm = {
 };
 
 export default function LocationsContent() {
+  const { sellerId: staffSellerId, isStaff, canAccessLocation, assignedLocationIds } = useStaff();
   const [locations, setLocations] = useState<Location[]>([]);
   const [inventoryCounts, setInventoryCounts] = useState<Record<string, LocationInventoryCount>>({});
   const [loading, setLoading] = useState(true);
@@ -112,22 +114,26 @@ export default function LocationsContent() {
   };
 
   const getSellerId = useCallback(async () => {
-    const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) return null;
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("auth_uid", userData.user.id)
-      .maybeSingle();
-    if (!profile) return null;
-    const { data: seller } = await supabase
-      .from("sellers")
-      .select("id")
-      .eq("profile_id", profile.id)
-      .eq("status", "approved")
-      .maybeSingle();
-    return seller?.id ?? null;
-  }, []);
+    let resolvedSellerId = staffSellerId;
+    if (!resolvedSellerId) {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) return null;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("auth_uid", userData.user.id)
+        .maybeSingle();
+      if (!profile) return null;
+      const { data: seller } = await supabase
+        .from("sellers")
+        .select("id")
+        .eq("profile_id", profile.id)
+        .eq("status", "approved")
+        .maybeSingle();
+      resolvedSellerId = seller?.id ?? null;
+    }
+    return resolvedSellerId;
+  }, [staffSellerId]);
 
   const loadLocations = useCallback(async () => {
     setLoading(true);
@@ -148,7 +154,11 @@ export default function LocationsContent() {
     if (fetchErr) {
       setError(fetchErr.message);
     } else {
-      setLocations(data ?? []);
+      let locs = data ?? [];
+      if (isStaff && assignedLocationIds.length > 0) {
+        locs = locs.filter((l: Location) => assignedLocationIds.includes(l.id));
+      }
+      setLocations(locs);
     }
 
     // Fetch inventory counts per location
@@ -375,18 +385,20 @@ export default function LocationsContent() {
                 Manage the places you stock inventory, fulfill orders, and sell products.
               </p>
             </div>
-            <button
-              onClick={() => {
-                resetForm();
-                setShowPanel(true);
-              }}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-800 transition-colors"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-              Add location
-            </button>
+            {!isStaff && (
+              <button
+                onClick={() => {
+                  resetForm();
+                  setShowPanel(true);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-800 transition-colors"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                Add location
+              </button>
+            )}
           </div>
         </div>
 
@@ -526,18 +538,20 @@ export default function LocationsContent() {
                 <p className="mt-1 text-sm text-gray-500">
                   Add your first location to start managing inventory across multiple places.
                 </p>
-                <button
-                  onClick={() => {
-                    resetForm();
-                    setShowPanel(true);
-                  }}
-                  className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                  </svg>
-                  Add location
-                </button>
+                {!isStaff && (
+                  <button
+                    onClick={() => {
+                      resetForm();
+                      setShowPanel(true);
+                    }}
+                    className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    Add location
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -662,30 +676,36 @@ export default function LocationsContent() {
 
                   {/* Actions */}
                   <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                    <button
-                      onClick={() => handleToggleActive(loc)}
-                      className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                        loc.is_active
-                          ? "text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                          : "text-emerald-600 hover:bg-emerald-50"
-                      }`}
-                      title={loc.is_active ? "Deactivate" : "Activate"}
-                    >
-                      {loc.is_active ? "Deactivate" : "Activate"}
-                    </button>
-                    <button
-                      onClick={() => handleEdit(loc)}
-                      className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(loc.id)}
-                      disabled={deleting === loc.id}
-                      className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 hover:text-red-700 transition-colors disabled:opacity-50"
-                    >
-                      {deleting === loc.id ? "..." : "Delete"}
-                    </button>
+                    {!isStaff && (
+                      <button
+                        onClick={() => handleToggleActive(loc)}
+                        className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                          loc.is_active
+                            ? "text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                            : "text-emerald-600 hover:bg-emerald-50"
+                        }`}
+                        title={loc.is_active ? "Deactivate" : "Activate"}
+                      >
+                        {loc.is_active ? "Deactivate" : "Activate"}
+                      </button>
+                    )}
+                    {!isStaff && (
+                      <button
+                        onClick={() => handleEdit(loc)}
+                        className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {!isStaff && (
+                      <button
+                        onClick={() => handleDelete(loc.id)}
+                        disabled={deleting === loc.id}
+                        className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 hover:text-red-700 transition-colors disabled:opacity-50"
+                      >
+                        {deleting === loc.id ? "..." : "Delete"}
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -879,8 +899,8 @@ export default function LocationsContent() {
                   </div>
                 </div>
 
-                {/* Delete button (edit mode only) */}
-                {editingId && (
+                {/* Delete button (edit mode only, hidden for staff) */}
+                {editingId && !isStaff && (
                   <div className="rounded-lg border border-red-100 bg-red-50 p-4">
                     <div className="flex items-center justify-between">
                       <div>

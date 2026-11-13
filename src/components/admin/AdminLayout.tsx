@@ -157,6 +157,7 @@ export default function AdminLayout({
   }, []);
 
   const handleSignOut = useCallback(async () => {
+    try { sessionStorage.removeItem("shopora_role_cache"); } catch { /* ignore */ }
     await supabase.auth.signOut();
     router.push("/admin/login");
   }, [router]);

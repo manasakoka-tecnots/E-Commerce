@@ -30,13 +30,12 @@ export async function PATCH(req: NextRequest) {
     const token = authHeader.replace("Bearer ", "");
     const supabase = getUserSupabase(token);
 
-    // Verify auth
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: "Invalid token" }, { status: 401 });
     }
 
-    // Use SECURITY DEFINER RPC to update order status (bypasses RLS)
+    // The RPC now enforces seller/staff ownership internally
     const { data, error } = await supabase.rpc("update_order_status_rpc", {
       p_order_id: orderId,
       p_status: newStatus,
@@ -45,6 +44,12 @@ export async function PATCH(req: NextRequest) {
     if (error) {
       console.error("Failed to update order status:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // Check for application-level errors from the RPC
+    const result = data as { success?: boolean; error?: string } | null;
+    if (result && typeof result === "object" && "success" in result && !result.success) {
+      return NextResponse.json({ error: result.error || "Not authorized" }, { status: 403 });
     }
 
     return NextResponse.json({ success: true });

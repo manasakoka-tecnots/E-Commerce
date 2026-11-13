@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, useRef } from "react";
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 import Pagination, { usePagination } from "@/src/components/Pagination";
 
 type SellerFile = {
@@ -22,6 +23,7 @@ export default function ContentFilesContent() {
   const [dragOver, setDragOver] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { sellerId: staffSellerId } = useStaff();
 
   const loadFiles = useCallback(async (sid: string) => {
     const { data } = await supabase
@@ -56,18 +58,22 @@ export default function ContentFilesContent() {
         .maybeSingle();
       if (!profile) { setLoading(false); return; }
 
-      const { data: seller } = await supabase
-        .from("sellers")
-        .select("id")
-        .eq("profile_id", profile.id)
-        .maybeSingle();
-      if (!seller) { setLoading(false); return; }
+      let resolvedSellerId = staffSellerId;
+      if (!resolvedSellerId) {
+        const { data: seller } = await supabase
+          .from("sellers")
+          .select("id")
+          .eq("profile_id", profile.id)
+          .maybeSingle();
+        resolvedSellerId = seller?.id ?? null;
+      }
+      if (!resolvedSellerId) { setLoading(false); return; }
 
-      setSellerId(seller.id);
-      await loadFiles(seller.id);
+      setSellerId(resolvedSellerId);
+      await loadFiles(resolvedSellerId);
       setLoading(false);
     })();
-  }, [loadFiles]);
+  }, [loadFiles, staffSellerId]);
 
   const uploadFiles = async (fileList: FileList) => {
     if (!sellerId || fileList.length === 0) return;

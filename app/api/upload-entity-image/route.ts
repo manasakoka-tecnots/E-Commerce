@@ -2,20 +2,58 @@ import { NextRequest, NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import crypto from "crypto";
+import { createClient } from "@supabase/supabase-js";
 
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif", "image/svg+xml"];
+// SVG removed from allowed types to prevent stored XSS
+const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif"];
 const MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 
-/**
- * Upload an image for a category or brand.
- * Saves to public/uploads/{entityType}/{filename}
- * Returns the public path.
- */
+function getUserSupabase(jwt: string) {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { global: { headers: { Authorization: `Bearer ${jwt}` } } }
+  );
+}
+
 export async function POST(request: NextRequest) {
   try {
+    // ── Authentication ──
+    const authHeader = request.headers.get("authorization");
+    const jwt = authHeader?.startsWith("Bearer ") ? authHeader.split(" ")[1] : undefined;
+    if (!jwt) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const supabase = getUserSupabase(jwt);
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: "Invalid or expired token" }, { status: 401 });
+    }
+
+    // ── Authorization: Only sellers, admins, and staff can upload ──
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id, role")
+      .eq("auth_uid", user.id)
+      .maybeSingle();
+
+    if (!profile || !["seller", "admin"].includes(profile.role)) {
+      const { data: staffRecord } = await supabase
+        .from("seller_staff")
+        .select("id")
+        .eq("profile_id", profile?.id ?? "")
+        .eq("status", "active")
+        .maybeSingle();
+
+      if (!staffRecord) {
+        return NextResponse.json({ error: "Not authorized to upload images" }, { status: 403 });
+      }
+    }
+
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
-    const entityType = formData.get("entityType") as string | null; // "categories" or "brands"
+    const entityType = formData.get("entityType") as string | null;
 
     if (!file) {
       return NextResponse.json({ error: "Missing file" }, { status: 400 });
@@ -27,7 +65,7 @@ export async function POST(request: NextRequest) {
 
     if (!ALLOWED_TYPES.includes(file.type)) {
       return NextResponse.json(
-        { error: "File type not supported. Use JPEG, PNG, WebP, AVIF, or SVG." },
+        { error: "File type not supported. Use JPEG, PNG, WebP, or AVIF." },
         { status: 400 }
       );
     }
@@ -37,6 +75,9 @@ export async function POST(request: NextRequest) {
     }
 
     const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+    if (!/^[a-z0-9]+$/.test(ext)) {
+      return NextResponse.json({ error: "Invalid file extension" }, { status: 400 });
+    }
     const safeName = `${crypto.randomUUID()}.${ext}`;
     const uploadDir = path.join(process.cwd(), "public", "uploads", entityType);
 

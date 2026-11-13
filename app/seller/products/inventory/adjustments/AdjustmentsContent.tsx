@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/src/lib/supabase/client";
 import Pagination, { usePagination } from "@/src/components/Pagination";
 import Link from "next/link";
+import { useStaff } from "@/src/context/StaffContext";
 
 /* ─── Types ─────────────────────────────────────────────────────────── */
 
@@ -98,6 +99,7 @@ export default function AdjustmentsContent() {
   const [adjustments, setAdjustments] = useState<AdjustmentRow[]>([]);
   const [locations, setLocations] = useState<SellerLocation[]>([]);
   const [loading, setLoading] = useState(true);
+  const { sellerId: staffSellerId, isStaff, assignedLocationIds } = useStaff();
 
   const [selectedLocationId, setSelectedLocationId] = useState<string>("all");
   const [selectedType, setSelectedType] = useState<string>("all");
@@ -125,12 +127,16 @@ export default function AdjustmentsContent() {
       return;
     }
 
-    const { data: seller } = await supabase
-      .from("sellers")
-      .select("id")
-      .eq("profile_id", profile.id)
-      .maybeSingle();
-    if (!seller) {
+    let resolvedSellerId = staffSellerId;
+    if (!resolvedSellerId) {
+      const { data: seller } = await supabase
+        .from("sellers")
+        .select("id")
+        .eq("profile_id", profile.id)
+        .maybeSingle();
+      resolvedSellerId = seller?.id ?? null;
+    }
+    if (!resolvedSellerId) {
       setLoading(false);
       return;
     }
@@ -139,13 +145,18 @@ export default function AdjustmentsContent() {
     const { data: locs } = await supabase
       .from("seller_locations")
       .select("id, name")
-      .eq("seller_id", seller.id)
+      .eq("seller_id", resolvedSellerId)
       .order("name");
 
-    const sellerLocations: SellerLocation[] = (locs ?? []).map((l: any) => ({
+    let sellerLocations: SellerLocation[] = (locs ?? []).map((l: any) => ({
       id: l.id,
       name: l.name,
     }));
+
+    // Staff: filter to only assigned locations
+    if (isStaff && assignedLocationIds.length > 0) {
+      sellerLocations = sellerLocations.filter((l) => assignedLocationIds.includes(l.id));
+    }
     setLocations(sellerLocations);
 
     const locationIds = sellerLocations.map((l) => l.id);
@@ -154,7 +165,7 @@ export default function AdjustmentsContent() {
     const { data: listings, error: listingsError } = await supabase
       .from("seller_listings")
       .select("id, product_id, products(name, sku)")
-      .eq("seller_id", seller.id);
+      .eq("seller_id", resolvedSellerId);
 
     if (listingsError) {
       console.error("Failed to load listings:", listingsError);
@@ -187,6 +198,11 @@ export default function AdjustmentsContent() {
       .select("id, created_at, listing_id, location_id, adjustment_type, quantity_change, old_available, new_available, reason, created_by, variant_title")
       .in("listing_id", listingIds)
       .order("created_at", { ascending: false });
+
+    // Staff: only show adjustments for assigned locations
+    if (isStaff && assignedLocationIds.length > 0) {
+      query = query.in("location_id", assignedLocationIds);
+    }
 
     // Date range filter
     if (dateRange !== "all") {
@@ -252,11 +268,18 @@ export default function AdjustmentsContent() {
 
     setAdjustments(rows);
     setLoading(false);
-  }, [dateRange]);
+  }, [dateRange, staffSellerId, isStaff, assignedLocationIds]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Auto-select single location for staff with one assignment
+  useEffect(() => {
+    if (isStaff && locations.length === 1 && selectedLocationId === "all") {
+      setSelectedLocationId(locations[0].id);
+    }
+  }, [isStaff, locations, selectedLocationId]);
 
   /* ── Filtered data ───────────────────────────────────────────────── */
 
@@ -316,7 +339,9 @@ export default function AdjustmentsContent() {
               }}
               className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-400 focus:ring-2 focus:ring-indigo-300/30 outline-none"
             >
-              <option value="all">All locations</option>
+              {(!isStaff || locations.length > 1) && (
+                <option value="all">All locations</option>
+              )}
               {locations.map((loc) => (
                 <option key={loc.id} value={loc.id}>
                   {loc.name}

@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 
 export default function SettingsPaymentsContent() {
+  const { sellerId: staffSellerId } = useStaff();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -18,34 +20,46 @@ export default function SettingsPaymentsContent() {
 
   useEffect(() => {
     (async () => {
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) { setLoading(false); return; }
+      let resolvedSellerId = staffSellerId;
+      if (!resolvedSellerId) {
+        const { data: userData } = await supabase.auth.getUser();
+        if (!userData.user) { setLoading(false); return; }
 
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("auth_uid", userData.user.id)
-        .maybeSingle();
-      if (!profile) { setLoading(false); return; }
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("auth_uid", userData.user.id)
+          .maybeSingle();
+        if (!profile) { setLoading(false); return; }
 
-      const { data: seller } = await supabase
+        const { data: seller } = await supabase
+          .from("sellers")
+          .select("id")
+          .eq("profile_id", profile.id)
+          .maybeSingle();
+        resolvedSellerId = seller?.id ?? null;
+      }
+      if (!resolvedSellerId) { setLoading(false); return; }
+
+      setSellerId(resolvedSellerId);
+
+      const { data: sellerData } = await supabase
         .from("sellers")
-        .select("id, bank_account_number, bank_ifsc, bank_name, bank_branch, upi_id")
-        .eq("profile_id", profile.id)
+        .select("bank_account_number, bank_ifsc, bank_name, bank_branch, upi_id")
+        .eq("id", resolvedSellerId)
         .maybeSingle();
 
-      if (seller) {
-        setSellerId(seller.id);
-        setAccountNumber(seller.bank_account_number || "");
-        setConfirmAccountNumber(seller.bank_account_number || "");
-        setIfsc(seller.bank_ifsc || "");
-        setBankName(seller.bank_name || "");
-        setBranch(seller.bank_branch || "");
-        setUpiId(seller.upi_id || "");
+      if (sellerData) {
+        setAccountNumber(sellerData.bank_account_number || "");
+        setConfirmAccountNumber(sellerData.bank_account_number || "");
+        setIfsc(sellerData.bank_ifsc || "");
+        setBankName(sellerData.bank_name || "");
+        setBranch(sellerData.bank_branch || "");
+        setUpiId(sellerData.upi_id || "");
       }
       setLoading(false);
     })();
-  }, []);
+  }, [staffSellerId]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

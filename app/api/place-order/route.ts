@@ -19,7 +19,6 @@ export async function POST(request: NextRequest) {
 
     const supabase = getUserSupabase(jwt);
 
-    // Verify the user
     const { data: { user }, error: authErr } = await supabase.auth.getUser();
     if (authErr || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -32,7 +31,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    // Use SECURITY DEFINER RPC to place order (bypasses RLS)
+    // ── IDOR Prevention: Verify profile_id belongs to the authenticated user ──
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", profile_id)
+      .eq("auth_uid", user.id)
+      .maybeSingle();
+
+    if (!profile) {
+      return NextResponse.json({ error: "Profile does not belong to authenticated user" }, { status: 403 });
+    }
+
+    // Verify address belongs to the user's profile
+    const { data: address } = await supabase
+      .from("addresses")
+      .select("id")
+      .eq("id", address_id)
+      .eq("profile_id", profile_id)
+      .maybeSingle();
+
+    if (!address) {
+      return NextResponse.json({ error: "Address not found or does not belong to user" }, { status: 403 });
+    }
+
     const { data, error } = await supabase.rpc("place_order", {
       p_profile_id: profile_id,
       p_address_id: address_id,
@@ -49,7 +71,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: data.error || "Failed to place order" }, { status: 403 });
     }
 
-    // Commit stock at location level (best-effort — doesn't block order)
+    // Commit stock at location level (best-effort)
     try {
       await supabase.rpc("commit_location_stock_for_order", {
         p_order_id: data.order_id,

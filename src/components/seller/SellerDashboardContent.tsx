@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -34,30 +35,17 @@ type LowStockItem = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Demo data (used when not authenticated)                            */
+/*  Default empty state                                                */
 /* ------------------------------------------------------------------ */
 
-const DEMO_METRICS: OverviewMetrics = {
-  totalSales: 284500,
-  totalOrders: 47,
-  activeListings: 24,
-  totalStock: 1250,
-  conversionRate: 3.8,
-  averageOrderValue: 6053,
+const EMPTY_METRICS: OverviewMetrics = {
+  totalSales: 0,
+  totalOrders: 0,
+  activeListings: 0,
+  totalStock: 0,
+  conversionRate: 0,
+  averageOrderValue: 0,
 };
-
-const DEMO_ORDERS: RecentOrder[] = [
-  { orderId: "demo-001-abcd", customerName: "Rahul Sharma", date: "2026-11-06T10:30:00Z", total: 12500, status: "shipped" },
-  { orderId: "demo-002-efgh", customerName: "Priya Patel", date: "2026-11-05T14:20:00Z", total: 8700, status: "processing" },
-  { orderId: "demo-003-ijkl", customerName: "Amit Kumar", date: "2026-11-04T09:15:00Z", total: 3200, status: "delivered" },
-  { orderId: "demo-004-mnop", customerName: "Sneha Reddy", date: "2026-11-03T16:45:00Z", total: 15800, status: "confirmed" },
-  { orderId: "demo-005-qrst", customerName: "Vikram Singh", date: "2026-11-02T11:00:00Z", total: 6300, status: "delivered" },
-];
-
-const DEMO_LOW_STOCK: LowStockItem[] = [
-  { productId: "demo-p1", productName: "Tata Sampann Chana Dal 1kg", currentStock: 2, threshold: 10, listingId: "demo-l1" },
-  { productId: "demo-p2", productName: "Samsung 25W Super Fast Charger", currentStock: 3, threshold: 8, listingId: "demo-l2" },
-];
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -85,11 +73,13 @@ const statusColor: Record<string, string> = {
 /* ------------------------------------------------------------------ */
 
 export default function SellerDashboardContent() {
+  const { sellerId: staffSellerId, isStaff, isOwner, assignedLocationIds, staffRole } = useStaff();
   const [loading, setLoading] = useState(true);
   const [businessName, setBusinessName] = useState("Shopora Seller");
-  const [metrics, setMetrics] = useState<OverviewMetrics>(DEMO_METRICS);
-  const [recentOrders, setRecentOrders] = useState<RecentOrder[]>(DEMO_ORDERS);
-  const [lowStockItems, setLowStockItems] = useState<LowStockItem[]>(DEMO_LOW_STOCK);
+  const [staffName, setStaffName] = useState<string | null>(null);
+  const [metrics, setMetrics] = useState<OverviewMetrics>(EMPTY_METRICS);
+  const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
+  const [lowStockItems, setLowStockItems] = useState<LowStockItem[]>([]);
 
   /* ---------- Data loader ---------- */
 
@@ -105,32 +95,58 @@ export default function SellerDashboardContent() {
         return;
       }
 
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("id, role")
-        .eq("auth_uid", userData.user.id)
-        .maybeSingle();
+      // Resolve seller ID: use staff context first, then detect via API
+      let sellerId = staffSellerId;
+      let bizName = "Shopora Seller";
 
-      if (!profile || (profile.role !== "seller" && profile.role !== "admin")) {
-        setLoading(false);
-        return;
+      if (!sellerId) {
+        // Try detect-role API (bypasses RLS)
+        const { data: session } = await supabase.auth.getSession();
+        if (session?.session?.access_token) {
+          try {
+            const res = await fetch("/api/auth/detect-role", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${session.session.access_token}`,
+              },
+            });
+            const roleData = await res.json();
+            if (roleData.sellerId) sellerId = roleData.sellerId;
+          } catch { /* continue */ }
+        }
+        if (!sellerId) {
+          setLoading(false);
+          return;
+        }
       }
 
+      // Fetch seller business name
       const { data: sellerData } = await supabase
         .from("sellers")
-        .select("id, business_name, status")
-        .eq("profile_id", profile.id)
+        .select("id, business_name")
+        .eq("id", sellerId)
         .maybeSingle();
+      if (sellerData?.business_name) bizName = sellerData.business_name;
 
-      if (!sellerData || sellerData.status !== "approved") {
+      if (!sellerId) {
         setLoading(false);
         return;
       }
 
-      setBusinessName(sellerData.business_name || "Shopora Seller");
+      setBusinessName(bizName);
 
-      // Fetch real data
-      const sellerId = sellerData.id;
+      // If staff, fetch their name using RPC (bypasses RLS issues)
+      if (isStaff && staffSellerId) {
+        const { data: staffRecord } = await supabase.rpc("get_my_staff_record");
+        if (staffRecord && Array.isArray(staffRecord) && staffRecord[0]?.name) {
+          setStaffName(staffRecord[0].name);
+        } else if (staffRecord && !Array.isArray(staffRecord) && (staffRecord as { name?: string }).name) {
+          setStaffName((staffRecord as { name: string }).name);
+        }
+      }
+
+      // Fetch real data — for staff, filter by assigned locations
       const { data: listings } = await supabase
         .from("seller_listings")
         .select("id, product_id, price, stock, status, products(id, name, low_stock_threshold)")
@@ -138,6 +154,25 @@ export default function SellerDashboardContent() {
 
       const allListings = listings ?? [];
       const listingIds = allListings.map((l) => l.id);
+
+      // For staff: fetch location-specific inventory to override listing-level stock
+      let locationStockMap: Map<string, number> | null = null;
+      if (isStaff && assignedLocationIds.length > 0) {
+        const { data: locInventory } = await supabase
+          .from("location_inventory")
+          .select("listing_id, available")
+          .in("location_id", assignedLocationIds)
+          .in("listing_id", listingIds);
+        if (locInventory) {
+          locationStockMap = new Map();
+          for (const li of locInventory) {
+            locationStockMap.set(
+              li.listing_id,
+              (locationStockMap.get(li.listing_id) || 0) + Number(li.available || 0)
+            );
+          }
+        }
+      }
 
       let allOrderItems: Array<{
         id: string;
@@ -189,7 +224,9 @@ export default function SellerDashboardContent() {
 
       // Calculate metrics
       const activeListings = allListings.filter((l) => l.status === "active");
-      const totalStock = activeListings.reduce((sum, l) => sum + (Number(l.stock) || 0), 0);
+      const totalStock = locationStockMap
+        ? Array.from(locationStockMap.values()).reduce((sum, v) => sum + v, 0)
+        : activeListings.reduce((sum, l) => sum + (Number(l.stock) || 0), 0);
       const completedStatuses = ["confirmed", "processing", "shipped", "in_transit", "out_for_delivery", "delivered"];
       const completedItems = allOrderItems.filter(
         (item) => item.orders && completedStatuses.includes(item.orders.status)
@@ -238,7 +275,9 @@ export default function SellerDashboardContent() {
         const product = Array.isArray(listing.products) ? (listing.products[0] ?? null) : (listing.products ?? null);
         if (!product) continue;
         const threshold = (product as { low_stock_threshold?: number }).low_stock_threshold ?? 5;
-        const currentStock = Number(listing.stock) || 0;
+        const currentStock = locationStockMap
+          ? (locationStockMap.get(listing.id) ?? 0)
+          : (Number(listing.stock) || 0);
         if (currentStock < threshold) {
           lowStock.push({
             productId: listing.product_id, productName: (product as { name: string }).name,
@@ -248,12 +287,12 @@ export default function SellerDashboardContent() {
       }
       lowStock.sort((a, b) => a.currentStock - b.currentStock);
       setLowStockItems(lowStock);
-    } catch {
-      // Supabase unavailable — keep demo data
+    } catch (err) {
+      console.error("[Dashboard] Failed to load data:", err);
     }
 
     setLoading(false);
-  }, []);
+  }, [staffSellerId, isStaff, assignedLocationIds]);
 
   useEffect(() => {
     void loadDashboard();
@@ -279,10 +318,12 @@ export default function SellerDashboardContent() {
       {/* Welcome Section */}
       <div>
         <h1 className="text-2xl font-extrabold text-gray-900 tracking-tight">
-          Welcome back, {businessName}
+          Welcome back, {staffName || businessName}
         </h1>
         <p className="text-sm text-gray-500 mt-1">
-          Here is an overview of your store performance and recent activity.
+          {isStaff
+            ? `${businessName} · ${staffRole ? staffRole.charAt(0).toUpperCase() + staffRole.slice(1) : "Staff"} · ${staffRole === "admin" ? "All locations" : `${assignedLocationIds.length} location${assignedLocationIds.length !== 1 ? "s" : ""}`}`
+            : "Here is an overview of your store performance and recent activity."}
         </p>
       </div>
 

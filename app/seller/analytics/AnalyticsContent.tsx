@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 import Spinner from "@/src/components/Spinner";
 
 const formatRupee = (value: number) =>
@@ -34,6 +35,7 @@ type DailyMetric = {
 };
 
 export default function AnalyticsContent() {
+  const { sellerId: staffSellerId } = useStaff();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>("30d");
@@ -80,13 +82,17 @@ export default function AnalyticsContent() {
       return;
     }
 
-    const { data: seller } = await supabase
-      .from("sellers")
-      .select("id")
-      .eq("profile_id", profile.id)
-      .maybeSingle();
+    let resolvedSellerId = staffSellerId;
+    if (!resolvedSellerId) {
+      const { data: seller } = await supabase
+        .from("sellers")
+        .select("id")
+        .eq("profile_id", profile.id)
+        .maybeSingle();
+      resolvedSellerId = seller?.id ?? null;
+    }
 
-    if (!seller) {
+    if (!resolvedSellerId) {
       setError("Seller account not found.");
       setLoading(false);
       return;
@@ -106,7 +112,7 @@ export default function AnalyticsContent() {
         orders!inner(id, status, created_at),
         seller_listings!inner(seller_id, products(name, category_id, categories(name)))
       `)
-      .eq("seller_listings.seller_id", seller.id)
+      .eq("seller_listings.seller_id", resolvedSellerId)
       .in("orders.status", ["delivered", "confirmed", "shipped"])
       .gte("orders.created_at", startDate);
 
@@ -115,7 +121,7 @@ export default function AnalyticsContent() {
       const { data: listings } = await supabase
         .from("seller_listings")
         .select("id")
-        .eq("seller_id", seller.id);
+        .eq("seller_id", resolvedSellerId);
 
       if (!listings || listings.length === 0) {
         setTotalSales(0);
@@ -237,7 +243,7 @@ export default function AnalyticsContent() {
     );
 
     setLoading(false);
-  }, [dateRange, getRangeDate]);
+  }, [dateRange, getRangeDate, staffSellerId]);
 
   useEffect(() => {
     void loadAnalytics();

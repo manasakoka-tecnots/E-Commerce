@@ -7,6 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/src/lib/supabase/client";
 import { getProductImageUrl } from "@/src/lib/catalog";
 import Spinner from "@/src/components/Spinner";
+import { useStaff } from "@/src/context/StaffContext";
 
 /* ──────────────────────── Types ──────────────────────── */
 
@@ -174,6 +175,8 @@ export default function SellerOrderDetailContent() {
   const [sellerLocations, setSellerLocations] = useState<SellerLocation[]>([]);
   const [creatingFulfillment, setCreatingFulfillment] = useState(false);
 
+  const { sellerId: staffSellerId, isStaff, staffRole, assignedLocationIds } = useStaff();
+
   // Compute unfulfilled quantities per order_item
   const unfulfilledItems = useMemo(() => {
     const fulfilledQty: Record<string, number> = {};
@@ -263,19 +266,23 @@ export default function SellerOrderDetailContent() {
       return;
     }
 
-    const { data: seller } = await supabase
-      .from("sellers")
-      .select("id")
-      .eq("profile_id", profile.id)
-      .maybeSingle();
+    let resolvedSellerId = staffSellerId;
+    if (!resolvedSellerId) {
+      const { data: seller } = await supabase
+        .from("sellers")
+        .select("id")
+        .eq("profile_id", profile.id)
+        .maybeSingle();
+      resolvedSellerId = seller?.id ?? null;
+    }
 
-    if (!seller) {
+    if (!resolvedSellerId) {
       setErrorMessage("Seller account not found.");
       setLoading(false);
       return;
     }
 
-    setSellerId(seller.id);
+    setSellerId(resolvedSellerId);
 
     // Get order
     const { data: orderData, error: orderError } = await supabase
@@ -324,7 +331,7 @@ export default function SellerOrderDetailContent() {
     const { data: listings } = await supabase
       .from("seller_listings")
       .select("id, product_id")
-      .eq("seller_id", seller.id);
+      .eq("seller_id", resolvedSellerId);
 
     const listingIds = (listings || []).map((l) => l.id);
     if (listingIds.length === 0) {
@@ -411,7 +418,7 @@ export default function SellerOrderDetailContent() {
         fulfillment_items (order_item_id, quantity)
       `)
       .eq("order_id", orderId)
-      .eq("seller_id", seller.id)
+      .eq("seller_id", resolvedSellerId)
       .order("created_at", { ascending: true });
 
     const parsedFulfillments: Fulfillment[] = (fulfillmentData || []).map((f) => {
@@ -439,18 +446,22 @@ export default function SellerOrderDetailContent() {
     const { data: locData } = await supabase
       .from("seller_locations")
       .select("id, name, type, is_default, city")
-      .eq("seller_id", seller.id)
+      .eq("seller_id", resolvedSellerId)
       .eq("is_active", true)
       .order("is_default", { ascending: false })
       .order("fulfillment_priority", { ascending: true });
 
-    setSellerLocations(locData || []);
+    // Staff: filter locations to only their assigned ones (admin sees all)
+    const filteredLocs = (locData || []).filter(
+      (loc) => !isStaff || staffRole === "admin" || assignedLocationIds.includes(loc.id)
+    );
+    setSellerLocations(filteredLocs);
 
     setOrder(orderDetail);
     setLineItems(parsedItems);
     setFulfillments(parsedFulfillments);
     setLoading(false);
-  }, [orderId]);
+  }, [orderId, staffSellerId, isStaff, assignedLocationIds]);
 
   useEffect(() => {
     void loadOrder();

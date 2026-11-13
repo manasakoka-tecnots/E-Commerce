@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 import Spinner from "@/src/components/Spinner";
 
 type StoreProfile = {
@@ -34,6 +35,8 @@ const COLOR_SCHEMES = [
 ];
 
 export default function StoreContent() {
+  const { sellerId: staffSellerId, isOwner, staffRole } = useStaff();
+  const canEditSettings = isOwner || staffRole === 'admin';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,10 +73,25 @@ export default function StoreContent() {
       setLoading(false);
       return;
     }
+    let resolvedSellerId = staffSellerId;
+    if (!resolvedSellerId) {
+      const { data: sellerRow } = await supabase
+        .from("sellers")
+        .select("id")
+        .eq("profile_id", profile.id)
+        .maybeSingle();
+      resolvedSellerId = sellerRow?.id ?? null;
+    }
+
+    if (!resolvedSellerId) {
+      setLoading(false);
+      return;
+    }
+
     const { data: seller } = await supabase
       .from("sellers")
       .select("*")
-      .eq("profile_id", profile.id)
+      .eq("id", resolvedSellerId)
       .maybeSingle();
 
     if (seller) {
@@ -92,7 +110,7 @@ export default function StoreContent() {
       setBannerUrl(seller.banner_url ?? null);
     }
     setLoading(false);
-  }, []);
+  }, [staffSellerId]);
 
   useEffect(() => {
     loadStore();
@@ -184,6 +202,12 @@ export default function StoreContent() {
           {success && (
             <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
               {success}
+            </div>
+          )}
+
+          {!canEditSettings && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+              You are viewing store settings as staff. Only the store owner or admin can make changes.
             </div>
           )}
 
@@ -392,7 +416,7 @@ export default function StoreContent() {
           <div className="flex justify-end">
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || !canEditSettings}
               className="rounded-lg bg-indigo-500 px-6 py-2 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save Changes"}

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 import Spinner from "@/src/components/Spinner";
 
 const formatRupee = (value: number) =>
@@ -19,6 +20,7 @@ export default function AnalyticsLiveContent() {
   const [ordersToday, setOrdersToday] = useState(0);
   const [revenueToday, setRevenueToday] = useState(0);
   const [lastRefresh, setLastRefresh] = useState(new Date());
+  const { sellerId: staffSellerId } = useStaff();
 
   const loadLiveData = useCallback(async () => {
     const { data: userData } = await supabase.auth.getUser();
@@ -40,13 +42,17 @@ export default function AnalyticsLiveContent() {
       return;
     }
 
-    const { data: seller } = await supabase
-      .from("sellers")
-      .select("id")
-      .eq("profile_id", profile.id)
-      .maybeSingle();
+    let resolvedSellerId = staffSellerId;
+    if (!resolvedSellerId) {
+      const { data: seller } = await supabase
+        .from("sellers")
+        .select("id")
+        .eq("profile_id", profile.id)
+        .maybeSingle();
+      resolvedSellerId = seller?.id ?? null;
+    }
 
-    if (!seller) {
+    if (!resolvedSellerId) {
       setError("Seller account not found.");
       setLoading(false);
       return;
@@ -60,7 +66,7 @@ export default function AnalyticsLiveContent() {
     const { data: listings } = await supabase
       .from("seller_listings")
       .select("id")
-      .eq("seller_id", seller.id);
+      .eq("seller_id", resolvedSellerId);
 
     if (!listings || listings.length === 0) {
       setOrdersToday(0);
@@ -99,7 +105,7 @@ export default function AnalyticsLiveContent() {
 
     setLastRefresh(new Date());
     setLoading(false);
-  }, []);
+  }, [staffSellerId]);
 
   useEffect(() => {
     void loadLiveData();

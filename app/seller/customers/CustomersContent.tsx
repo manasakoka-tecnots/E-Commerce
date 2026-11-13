@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/src/lib/supabase/client";
 import Spinner from "@/src/components/Spinner";
 import Pagination, { usePagination } from "@/src/components/Pagination";
+import { useStaff } from "@/src/context/StaffContext";
 
 const formatRupee = (value: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -24,6 +25,7 @@ type Customer = {
 };
 
 export default function CustomersContent() {
+  const { sellerId: staffSellerId } = useStaff();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -54,13 +56,17 @@ export default function CustomersContent() {
       return;
     }
 
-    const { data: seller } = await supabase
-      .from("sellers")
-      .select("id")
-      .eq("profile_id", profile.id)
-      .maybeSingle();
+    let resolvedSellerId = staffSellerId;
+    if (!resolvedSellerId) {
+      const { data: seller } = await supabase
+        .from("sellers")
+        .select("id")
+        .eq("profile_id", profile.id)
+        .maybeSingle();
+      resolvedSellerId = seller?.id ?? null;
+    }
 
-    if (!seller) {
+    if (!resolvedSellerId) {
       setError("Seller account not found.");
       setLoading(false);
       return;
@@ -70,7 +76,7 @@ export default function CustomersContent() {
     const { data: listings } = await supabase
       .from("seller_listings")
       .select("id")
-      .eq("seller_id", seller.id);
+      .eq("seller_id", resolvedSellerId);
 
     if (!listings || listings.length === 0) {
       setCustomers([]);
@@ -168,7 +174,7 @@ export default function CustomersContent() {
 
     setCustomers(customerList);
     setLoading(false);
-  }, []);
+  }, [staffSellerId]);
 
   useEffect(() => {
     void loadCustomers();

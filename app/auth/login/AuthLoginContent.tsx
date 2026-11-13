@@ -31,7 +31,11 @@ function LoginForm() {
     setLoading(true);
     setErrorMsg("");
 
-    const { error } = await supabase.auth.signInWithPassword({ email: data.email, password: data.password });
+    // Use the session directly from signInWithPassword — don't rely on getSession()
+    const { data: signInData, error } = await supabase.auth.signInWithPassword({
+      email: data.email,
+      password: data.password,
+    });
     if (error) {
       if (error.message === "Email not confirmed") {
         setErrorMsg("Your email is not verified yet. Please check your inbox and click the verification link.");
@@ -42,51 +46,77 @@ function LoginForm() {
       return;
     }
 
-    const { data: userData, error: userErr } = await supabase.auth.getUser();
-    if (userErr) {
-      setErrorMsg(userErr.message);
+    const accessToken = signInData.session?.access_token;
+    if (!accessToken) {
+      setErrorMsg("Login succeeded but no session was returned. Please try again.");
       setLoading(false);
       return;
     }
 
-    const user = userData.user;
-
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("id, role")
-      .eq("auth_uid", user.id)
-      .maybeSingle();
-
-    if (profileError) {
-      setErrorMsg(`Could not load your account role: ${profileError.message}`);
-      setLoading(false);
-      return;
-    }
-
-    const role = profile?.role ?? "customer";
-
+    // If there's a specific redirect (e.g., from invite page), go there directly
     if (redirectTo) {
       router.replace(redirectTo);
-    } else if (role === "admin") {
-      router.replace("/admin/dashboard");
-    } else if (role === "seller") {
-      const { data: seller, error: sellerError } = await supabase
-        .from("sellers")
-        .select("status")
-        .eq("profile_id", profile?.id ?? "")
-        .maybeSingle();
-
-      if (sellerError) {
-        setErrorMsg(`Could not load your seller application: ${sellerError.message}`);
-      } else if (seller?.status === "approved") {
-        router.replace("/seller/dashboard");
-      } else {
-        setErrorMsg("Your seller account is not active yet. Please complete registration details or contact support.");
-      }
-    } else {
-      router.replace("/dashboard");
+      setLoading(false);
+      return;
     }
 
+    // Detect role using server-side API (bypasses all RLS issues)
+    // Retry up to 2 times if the API fails (transient DB errors, timeouts)
+    let roleData: Record<string, unknown> | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch("/api/auth/detect-role", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+        if (res.ok) {
+          roleData = await res.json();
+          break;
+        }
+        console.warn(`[Login] detect-role attempt ${attempt + 1} failed: ${res.status}`);
+      } catch (err) {
+        console.warn(`[Login] detect-role attempt ${attempt + 1} error:`, err);
+      }
+      // Brief pause before retry
+      if (attempt < 1) await new Promise(r => setTimeout(r, 1000));
+    }
+
+    if (roleData) {
+      // Cache role data so SellerAuthWrapper and StaffContext don't need
+      // another round-trip — they can read it instantly on first load.
+      try {
+        sessionStorage.setItem("shopora_role_cache", JSON.stringify({
+          ...roleData,
+          cachedAt: Date.now(),
+        }));
+      } catch { /* sessionStorage unavailable in some contexts */ }
+
+      if (roleData.role === "admin") {
+        router.replace("/admin/dashboard");
+        return;
+      }
+      if (roleData.role === "seller" || roleData.role === "staff") {
+        router.replace("/seller/dashboard");
+        return;
+      }
+      if (roleData.role === "seller_pending") {
+        setErrorMsg("Your seller account is not active yet. Please complete registration details or contact support.");
+        setLoading(false);
+        return;
+      }
+    } else {
+      // detect-role failed after retries — don't silently redirect to customer
+      console.error("[Login] detect-role failed after retries");
+      setErrorMsg("Unable to detect your account type. Please try logging in again.");
+      setLoading(false);
+      return;
+    }
+
+    // Default: customer dashboard
+    router.replace("/dashboard");
     setLoading(false);
   };
 
@@ -229,7 +259,7 @@ function LoginForm() {
           </div>
 
           <Link
-            href="/auth/register"
+            href={redirectTo ? `/auth/register?redirect=${encodeURIComponent(redirectTo)}` : "/auth/register"}
             className="block w-full border-2 border-slate-300 py-3 text-center text-sm font-bold uppercase tracking-wider text-[#ff3f6c] transition hover:border-[#ff3f6c]"
           >
             Create an Account

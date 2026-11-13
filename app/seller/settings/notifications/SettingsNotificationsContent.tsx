@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 
 type NotifPrefs = {
   email_new_order: boolean;
@@ -41,6 +42,7 @@ const PREF_LABELS: { key: keyof NotifPrefs; label: string; description: string }
 ];
 
 export default function SettingsNotificationsContent() {
+  const { sellerId: staffSellerId } = useStaff();
   const [prefs, setPrefs] = useState<NotifPrefs>(DEFAULT_PREFS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -49,31 +51,43 @@ export default function SettingsNotificationsContent() {
 
   useEffect(() => {
     (async () => {
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) { setLoading(false); return; }
+      let resolvedSellerId = staffSellerId;
+      if (!resolvedSellerId) {
+        const { data: userData } = await supabase.auth.getUser();
+        if (!userData.user) { setLoading(false); return; }
 
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("auth_uid", userData.user.id)
-        .maybeSingle();
-      if (!profile) { setLoading(false); return; }
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("auth_uid", userData.user.id)
+          .maybeSingle();
+        if (!profile) { setLoading(false); return; }
 
-      const { data: seller } = await supabase
+        const { data: seller } = await supabase
+          .from("sellers")
+          .select("id")
+          .eq("profile_id", profile.id)
+          .maybeSingle();
+        resolvedSellerId = seller?.id ?? null;
+      }
+      if (!resolvedSellerId) { setLoading(false); return; }
+
+      setSellerId(resolvedSellerId);
+
+      const { data: sellerData } = await supabase
         .from("sellers")
-        .select("id, notification_preferences")
-        .eq("profile_id", profile.id)
+        .select("notification_preferences")
+        .eq("id", resolvedSellerId)
         .maybeSingle();
 
-      if (seller) {
-        setSellerId(seller.id);
-        if (seller.notification_preferences) {
-          setPrefs({ ...DEFAULT_PREFS, ...seller.notification_preferences });
+      if (sellerData) {
+        if (sellerData.notification_preferences) {
+          setPrefs({ ...DEFAULT_PREFS, ...sellerData.notification_preferences });
         }
       }
       setLoading(false);
     })();
-  }, []);
+  }, [staffSellerId]);
 
   const toggle = (key: keyof NotifPrefs) => {
     setPrefs((prev) => ({ ...prev, [key]: !prev[key] }));

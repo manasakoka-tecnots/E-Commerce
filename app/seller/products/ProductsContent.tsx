@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/src/lib/supabase/client";
 import { getProductImageUrl } from "@/src/lib/catalog";
+import { useStaff } from "@/src/context/StaffContext";
 import Pagination, { usePagination } from "@/src/components/Pagination";
 
 /* ------------------------------------------------------------------ */
@@ -44,6 +45,7 @@ export default function ProductsContent() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const ITEMS_PER_PAGE = 8;
   const [currentPage, setCurrentPage] = useState(1);
+  const { sellerId: staffSellerId } = useStaff();
 
   const loadProducts = useCallback(async (sid: string) => {
     const { data: listings, error: listingsError } = await supabase
@@ -159,29 +161,34 @@ export default function ProductsContent() {
         .eq("auth_uid", userData.user.id)
         .maybeSingle();
 
-      if (!profile || (profile.role !== "seller" && profile.role !== "admin")) {
+      if (!staffSellerId && (!profile || (profile.role !== "seller" && profile.role !== "admin"))) {
         setAuthError("You do not have seller permissions.");
         setLoading(false);
         return;
       }
 
-      const { data: seller } = await supabase
-        .from("sellers")
-        .select("id, status")
-        .eq("profile_id", profile.id)
-        .maybeSingle();
+      let resolvedSellerId = staffSellerId;
+      if (!resolvedSellerId) {
+        const { data: seller } = await supabase
+          .from("sellers")
+          .select("id, status")
+          .eq("profile_id", profile!.id)
+          .maybeSingle();
 
-      if (!seller || seller.status !== "approved") {
-        setAuthError("Your seller account is not yet approved.");
-        setLoading(false);
-        return;
+        if (!seller || seller.status !== "approved") {
+          setAuthError("Your seller account is not yet approved.");
+          setLoading(false);
+          return;
+        }
+        resolvedSellerId = seller.id;
       }
+      if (!resolvedSellerId) return;
 
-      setSellerId(seller.id);
-      await loadProducts(seller.id);
+      setSellerId(resolvedSellerId);
+      await loadProducts(resolvedSellerId);
       setLoading(false);
     })();
-  }, [loadProducts]);
+  }, [loadProducts, staffSellerId]);
 
   /* ---- derived data ---- */
   const getEffectiveStatus = (item: ProductListing): StatusFilter => {

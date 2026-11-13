@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 import Spinner from "@/src/components/Spinner";
 import Pagination, { usePagination } from "@/src/components/Pagination";
 
@@ -27,6 +28,7 @@ export default function FinancesPayoutsContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [payouts, setPayouts] = useState<Payout[]>([]);
+  const { sellerId: staffSellerId } = useStaff();
 
   const loadPayouts = useCallback(async () => {
     setLoading(true);
@@ -51,13 +53,17 @@ export default function FinancesPayoutsContent() {
       return;
     }
 
-    const { data: seller } = await supabase
-      .from("sellers")
-      .select("id")
-      .eq("profile_id", profile.id)
-      .maybeSingle();
+    let resolvedSellerId = staffSellerId;
+    if (!resolvedSellerId) {
+      const { data: seller } = await supabase
+        .from("sellers")
+        .select("id")
+        .eq("profile_id", profile.id)
+        .maybeSingle();
+      resolvedSellerId = seller?.id ?? null;
+    }
 
-    if (!seller) {
+    if (!resolvedSellerId) {
       setError("Seller account not found.");
       setLoading(false);
       return;
@@ -66,7 +72,7 @@ export default function FinancesPayoutsContent() {
     const { data: payoutData, error: payoutErr } = await supabase
       .from("seller_payouts")
       .select("id, amount, status, method, reference, created_at")
-      .eq("seller_id", seller.id)
+      .eq("seller_id", resolvedSellerId)
       .order("created_at", { ascending: false });
 
     if (payoutErr) {
@@ -86,7 +92,7 @@ export default function FinancesPayoutsContent() {
     }
 
     setLoading(false);
-  }, []);
+  }, [staffSellerId]);
 
   useEffect(() => {
     void loadPayouts();

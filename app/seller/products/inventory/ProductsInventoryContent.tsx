@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/src/lib/supabase/client";
 import Pagination, { usePagination } from "@/src/components/Pagination";
 import Link from "next/link";
+import { useStaff } from "@/src/context/StaffContext";
 
 /* ─── Types ─────────────────────────────────────────────────────────── */
 
@@ -131,6 +132,7 @@ function stockStatus(available: number): "in_stock" | "low" | "out" {
 /* ─── Component ─────────────────────────────────────────────────────── */
 
 export default function ProductsInventoryContent() {
+  const { isStaff, assignedLocationIds, canAccessLocation, hasPermission, sellerId: staffSellerId } = useStaff();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [locations, setLocations] = useState<SellerLocation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -171,11 +173,15 @@ export default function ProductsInventoryContent() {
       .order("is_default", { ascending: false })
       .order("name");
 
-    const sellerLocations: SellerLocation[] = (locs ?? []).map((l: any) => ({
+    let sellerLocations: SellerLocation[] = (locs ?? []).map((l: any) => ({
       id: l.id,
       name: l.name,
       is_default: !!l.is_default,
     }));
+    // Staff members only see their assigned locations
+    if (isStaff && assignedLocationIds.length > 0) {
+      sellerLocations = sellerLocations.filter((l) => assignedLocationIds.includes(l.id));
+    }
     setLocations(sellerLocations);
 
     const { data: listingsData, error: listingsErr } = await supabase
@@ -248,9 +254,15 @@ export default function ProductsInventoryContent() {
     }
 
     // Helper to build LocationStock[] from raw location_inventory rows
+    // Staff members only see stock for their assigned locations
+    const staffLocationSet = isStaff && assignedLocationIds.length > 0
+      ? new Set(assignedLocationIds)
+      : null;
+
     const buildLocationStock = (rows: any[]): LocationStock[] =>
       rows
         .filter((r: any) => r && r.location_id)
+        .filter((r: any) => !staffLocationSet || staffLocationSet.has(r.location_id))
         .map((r: any) => ({
           location_id: r.location_id,
           location_name: locNameMap[r.location_id] ?? "Unknown",
@@ -287,32 +299,63 @@ export default function ProductsInventoryContent() {
     });
 
     setItems(mapped);
-  }, []);
+  }, [isStaff, assignedLocationIds]);
 
   useEffect(() => {
     (async () => {
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) { setLoading(false); return; }
+      let resolvedSellerId = staffSellerId;
+      if (!resolvedSellerId) {
+        const { data: userData } = await supabase.auth.getUser();
+        if (!userData.user) { setLoading(false); return; }
 
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("auth_uid", userData.user.id)
-        .maybeSingle();
-      if (!profile) { setLoading(false); return; }
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("auth_uid", userData.user.id)
+          .maybeSingle();
+        if (!profile) { setLoading(false); return; }
 
-      const { data: seller } = await supabase
-        .from("sellers")
-        .select("id")
-        .eq("profile_id", profile.id)
-        .maybeSingle();
-      if (!seller) { setLoading(false); return; }
+        const { data: seller } = await supabase
+          .from("sellers")
+          .select("id")
+          .eq("profile_id", profile.id)
+          .maybeSingle();
+        resolvedSellerId = seller?.id ?? null;
+      }
+      if (!resolvedSellerId) { setLoading(false); return; }
 
-      setSellerId(seller.id);
-      await loadData(seller.id);
+      setSellerId(resolvedSellerId);
+      await loadData(resolvedSellerId);
       setLoading(false);
     })();
-  }, [loadData]);
+  }, [loadData, staffSellerId]);
+
+  // Auto-select single location for staff with one assignment
+  useEffect(() => {
+    if (isStaff && locations.length === 1 && selectedLocationId === "all") {
+      setSelectedLocationId(locations[0].id);
+    }
+  }, [isStaff, locations, selectedLocationId]);
+
+  /** Whether the current user can adjust inventory at a specific location */
+  const canAdjustAtLocation = useCallback(
+    (locationId: string): boolean =>
+      !isStaff || hasPermission(locationId, "inventory_edit"),
+    [isStaff, hasPermission],
+  );
+
+  /** Whether the current user can adjust inventory for a given row */
+  const canAdjustInventory = useCallback(
+    (row: InventoryRow): boolean => {
+      if (!isStaff) return true;
+      if (selectedLocationId !== "all") {
+        return hasPermission(selectedLocationId, "inventory_edit");
+      }
+      // "All locations" — allow if user can edit at least one location in the row
+      return row.location_stock.some((ls) => hasPermission(ls.location_id, "inventory_edit"));
+    },
+    [isStaff, selectedLocationId, hasPermission],
+  );
 
   /* ── Flatten items into rows (Shopify-style) ──────────────────── */
 
@@ -603,8 +646,12 @@ export default function ProductsInventoryContent() {
         },
       ]);
     } else {
+      // When viewing "all locations", only show locations the user can edit
+      const editableLocations = isStaff
+        ? locations.filter((loc) => hasPermission(loc.id, "inventory_edit"))
+        : locations;
       setAdjustEntries(
-        locations.map((loc) => {
+        editableLocations.map((loc) => {
           const ls = relevantStock.find((l) => l.location_id === loc.id);
           return {
             location_id: loc.id,
@@ -649,6 +696,16 @@ export default function ProductsInventoryContent() {
 
   const handleSaveAdjustment = async () => {
     if (!adjustItem || !sellerId) return;
+    // Guard: verify permission for each location before saving
+    if (isStaff) {
+      const unauthorized = adjustEntries.find(
+        (e) => e.location_id !== "__legacy__" && !hasPermission(e.location_id, "inventory_edit")
+      );
+      if (unauthorized) {
+        showToast(`No inventory_edit permission at ${unauthorized.location_name}`, "error");
+        return;
+      }
+    }
     setAdjustSaving(true);
 
     try {
@@ -749,7 +806,9 @@ export default function ProductsInventoryContent() {
                 }}
                 className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium shadow-sm focus:border-indigo-400 focus:ring-2 focus:ring-indigo-300/30 outline-none"
               >
-                <option value="all">All locations</option>
+                {(!isStaff || locations.length > 1) && (
+                  <option value="all">All locations</option>
+                )}
                 {locations.map((loc) => (
                   <option key={loc.id} value={loc.id}>
                     {loc.name}{loc.is_default ? " (Default)" : ""}
@@ -886,7 +945,8 @@ export default function ProductsInventoryContent() {
                     </span>
                     <button
                       onClick={() => openAdjustModal(row._item, row.variant_id)}
-                      className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-700 flex-shrink-0"
+                      disabled={!canAdjustInventory(row)}
+                      className={`text-[10px] font-semibold flex-shrink-0 ${canAdjustInventory(row) ? "text-indigo-600 hover:text-indigo-700" : "text-gray-400 cursor-not-allowed"}`}
                     >
                       Adjust
                     </button>
@@ -1121,7 +1181,8 @@ export default function ProductsInventoryContent() {
                       <td className="py-3 px-4 text-right">
                         <button
                           onClick={() => openAdjustModal(row._item, row.variant_id)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50 transition"
+                          disabled={!canAdjustInventory(row)}
+                          className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-medium shadow-sm transition ${canAdjustInventory(row) ? "border-gray-300 bg-white text-gray-700 hover:bg-gray-50" : "border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed"}`}
                         >
                           <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
@@ -1225,6 +1286,11 @@ export default function ProductsInventoryContent() {
             </div>
 
             <div className="px-6 py-4 space-y-5">
+              {adjustEntries.length === 0 && isStaff && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  You do not have <span className="font-semibold">inventory_edit</span> permission at any location for this item.
+                </div>
+              )}
               {adjustEntries.map((entry, idx) => {
                 const preview = getPreview(entry);
                 const deltaStr =
@@ -1343,7 +1409,7 @@ export default function ProductsInventoryContent() {
               </button>
               <button
                 onClick={handleSaveAdjustment}
-                disabled={adjustSaving}
+                disabled={adjustSaving || adjustEntries.length === 0}
                 className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50 transition"
               >
                 {adjustSaving ? "Saving..." : "Save adjustment"}

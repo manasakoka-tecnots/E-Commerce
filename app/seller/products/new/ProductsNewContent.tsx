@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/src/lib/supabase/client";
 import BrandSelector from "@/src/components/seller/BrandSelector";
+import { useStaff } from "@/src/context/StaffContext";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -142,6 +143,7 @@ const initialForm: FormData = {
 
 export default function ProductsNewContent() {
   const router = useRouter();
+  const { sellerId: staffSellerId, isStaff, assignedLocationIds } = useStaff();
 
   /* Auth & seller state */
   const [sellerId, setSellerId] = useState<string | null>(null);
@@ -231,37 +233,45 @@ export default function ProductsNewContent() {
         .eq("auth_uid", userData.user.id)
         .maybeSingle();
 
-      if (!profile || (profile.role !== "seller" && profile.role !== "admin")) {
+      if (!profile || (profile.role !== "seller" && profile.role !== "admin" && !staffSellerId)) {
         setAuthError("You do not have seller permissions.");
         setAuthLoading(false);
         return;
       }
 
-      const { data: seller } = await supabase
-        .from("sellers")
-        .select("id, status")
-        .eq("profile_id", profile.id)
-        .maybeSingle();
+      let resolvedSellerId = staffSellerId;
+      if (!resolvedSellerId) {
+        const { data: seller } = await supabase
+          .from("sellers")
+          .select("id, status")
+          .eq("profile_id", profile.id)
+          .maybeSingle();
 
-      if (!seller || seller.status !== "approved") {
-        setAuthError("Your seller account is not yet approved.");
-        setAuthLoading(false);
-        return;
+        if (!seller || seller.status !== "approved") {
+          setAuthError("Your seller account is not yet approved.");
+          setAuthLoading(false);
+          return;
+        }
+        resolvedSellerId = seller.id;
       }
 
-      setSellerId(seller.id);
+      setSellerId(resolvedSellerId);
 
       /* Load seller locations */
       const { data: locs } = await supabase
         .from("seller_locations")
         .select("id, name, type, is_default")
-        .eq("seller_id", seller.id)
+        .eq("seller_id", resolvedSellerId)
         .eq("is_active", true)
         .order("fulfillment_priority", { ascending: true });
       if (locs && locs.length > 0) {
-        setLocations(locs);
+        // Staff members only see their assigned locations
+        const filteredLocs = isStaff && assignedLocationIds.length > 0
+          ? locs.filter((loc: any) => assignedLocationIds.includes(loc.id))
+          : locs;
+        setLocations(filteredLocs);
         const stockMap: Record<string, number> = {};
-        locs.forEach((loc) => { stockMap[loc.id] = 0; });
+        filteredLocs.forEach((loc: any) => { stockMap[loc.id] = 0; });
         setLocationStock(stockMap);
       }
 
@@ -276,7 +286,7 @@ export default function ProductsNewContent() {
 
       setAuthLoading(false);
     })();
-  }, []);
+  }, [staffSellerId]);
 
   /* ---- tag handling ---- */
   const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

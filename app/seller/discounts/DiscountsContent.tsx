@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 import Spinner from "@/src/components/Spinner";
 import Pagination, { usePagination } from "@/src/components/Pagination";
 
@@ -45,6 +46,7 @@ export default function DiscountsContent() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const { sellerId: staffSellerId } = useStaff();
 
   // Form
   const [code, setCode] = useState("");
@@ -57,6 +59,7 @@ export default function DiscountsContent() {
   const [isActive, setIsActive] = useState(true);
 
   const getSellerId = useCallback(async () => {
+    if (staffSellerId) return staffSellerId;
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) return null;
     const { data: profile } = await supabase
@@ -72,7 +75,7 @@ export default function DiscountsContent() {
       .eq("status", "approved")
       .maybeSingle();
     return seller?.id ?? null;
-  }, []);
+  }, [staffSellerId]);
 
   const loadDiscounts = useCallback(async () => {
     setLoading(true);

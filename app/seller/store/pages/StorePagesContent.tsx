@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 import Spinner from "@/src/components/Spinner";
 import Pagination, { usePagination } from "@/src/components/Pagination";
 
@@ -24,6 +25,7 @@ const slugify = (text: string) =>
     .replace(/(^-|-$)/g, "");
 
 export default function StorePagesContent() {
+  const { sellerId: staffSellerId } = useStaff();
   const ITEMS_PER_PAGE = 8;
   const [pages, setPages] = useState<SellerPage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,6 +42,7 @@ export default function StorePagesContent() {
   const [isPublished, setIsPublished] = useState(false);
 
   const getSellerId = useCallback(async () => {
+    if (staffSellerId) return staffSellerId;
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) return null;
     const { data: profile } = await supabase
@@ -55,7 +58,7 @@ export default function StorePagesContent() {
       .eq("status", "approved")
       .maybeSingle();
     return seller?.id ?? null;
-  }, []);
+  }, [staffSellerId]);
 
   const loadPages = useCallback(async () => {
     setLoading(true);

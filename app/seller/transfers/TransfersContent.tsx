@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 
 /* ───────── types ───────── */
 
@@ -94,6 +95,7 @@ const formatDate = (iso: string) =>
 /* ───────── component ───────── */
 
 export default function TransfersContent() {
+  const { sellerId: staffSellerId, isStaff, staffRole, assignedLocationIds, canAccessLocation, hasPermission } = useStaff();
   /* auth / seller state */
   const [sellerId, setSellerId] = useState<string | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
@@ -148,31 +150,55 @@ export default function TransfersContent() {
         return;
       }
 
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("auth_uid", userData.user.id)
-        .maybeSingle();
-      if (!profile) {
+      // Use detect-role API to get profile ID and seller ID (bypasses RLS)
+      let profileId: string | null = null;
+      let resolvedSellerId = staffSellerId;
+
+      const { data: session } = await supabase.auth.getSession();
+      if (session?.session?.access_token) {
+        try {
+          const res = await fetch("/api/auth/detect-role", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.session.access_token}`,
+            },
+          });
+          const roleData = await res.json();
+          profileId = roleData.profileId || null;
+          if (!resolvedSellerId) resolvedSellerId = roleData.sellerId || null;
+        } catch { /* continue */ }
+      }
+
+      if (!profileId) {
+        // Fallback: try direct query
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("auth_uid", userData.user.id)
+          .maybeSingle();
+        profileId = profile?.id ?? null;
+      }
+
+      if (!profileId) {
         setLoading(false);
         return;
       }
-      setProfileId(profile.id);
+      setProfileId(profileId);
 
-      const { data: seller } = await supabase
-        .from("sellers")
-        .select("id")
-        .eq("profile_id", profile.id)
-        .maybeSingle();
-      if (!seller) {
+      if (!resolvedSellerId) {
+        const { data: seller } = await supabase.from("sellers").select("id").eq("profile_id", profileId).maybeSingle();
+        resolvedSellerId = seller?.id ?? null;
+      }
+      if (!resolvedSellerId) {
         setLoading(false);
         return;
       }
 
-      setSellerId(seller.id);
+      setSellerId(resolvedSellerId);
       setLoading(false);
     })();
-  }, []);
+  }, [staffSellerId]);
 
   /* ── load transfers ── */
   const loadTransfers = useCallback(async (sid: string) => {
@@ -234,14 +260,26 @@ export default function TransfersContent() {
   }, []);
 
   /* ── load locations ── */
+  // allSellerLocations: every location the seller has (for transfer destinations)
+  // locations: filtered to staff's assigned locations (for origin selection + display)
+  const [allSellerLocations, setAllSellerLocations] = useState<Location[]>([]);
+
   const loadLocations = useCallback(async (sid: string) => {
     const { data } = await supabase
       .from("seller_locations")
       .select("id, name, type, city, state")
       .eq("seller_id", sid)
       .order("name");
-    if (data) setLocations(data);
-  }, []);
+    if (data) {
+      setAllSellerLocations(data);
+      // Staff origin is restricted to assigned locations (admin sees all)
+      if (isStaff && staffRole !== "admin" && assignedLocationIds.length > 0) {
+        setLocations(data.filter((l: Location) => assignedLocationIds.includes(l.id)));
+      } else {
+        setLocations(data);
+      }
+    }
+  }, [isStaff, staffRole, assignedLocationIds]);
 
   /* ── load listings ── */
   const loadListings = useCallback(async (sid: string) => {
@@ -273,11 +311,20 @@ export default function TransfersContent() {
     loadListings(sellerId);
   }, [sellerId, loadTransfers, loadLocations, loadListings]);
 
+  /* ── staff location filtering for transfers list ── */
+  // Admin staff sees all transfers (like owner); Manager/Associate filtered by assigned locations
+  const visibleTransfers = (isStaff && staffRole !== "admin")
+    ? transfers.filter(t =>
+        assignedLocationIds.includes(t.from_location_id) ||
+        assignedLocationIds.includes(t.to_location_id)
+      )
+    : transfers;
+
   /* ── summary counts ── */
-  const totalCount = transfers.length;
-  const pendingCount = transfers.filter((t) => t.status === "pending").length;
-  const inTransitCount = transfers.filter((t) => t.status === "in_transit").length;
-  const receivedCount = transfers.filter((t) => t.status === "received").length;
+  const totalCount = visibleTransfers.length;
+  const pendingCount = visibleTransfers.filter((t) => t.status === "pending").length;
+  const inTransitCount = visibleTransfers.filter((t) => t.status === "in_transit").length;
+  const receivedCount = visibleTransfers.filter((t) => t.status === "received").length;
 
   /* ── generate reference ── */
   const generateReference = () => {
@@ -419,6 +466,10 @@ export default function TransfersContent() {
 
   /* ── create transfer ── */
   const handleCreate = async () => {
+    if (isStaff && fromLocationId && !hasPermission(fromLocationId, 'transfers_create')) {
+      showToast("You don't have permission to create transfers from this location.", "error");
+      return;
+    }
     if (!sellerId || !fromLocationId || !toLocationId || transferItems.length === 0) {
       alert("Please fill in all required fields and add at least one product.");
       showToast("Please fill in all required fields and add at least one product.", "error");
@@ -986,7 +1037,7 @@ export default function TransfersContent() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {transfers.length === 0 ? (
+              {visibleTransfers.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-16 text-center">
                     <div className="flex flex-col items-center gap-3">
@@ -1001,7 +1052,7 @@ export default function TransfersContent() {
                   </td>
                 </tr>
               ) : (
-                transfers.map((t) => (
+                visibleTransfers.map((t) => (
                   <tr key={t.id} className="hover:bg-gray-50/70 transition">
                     <td className="py-3 px-4 font-medium text-gray-900">
                       {t.reference_number}
@@ -1093,7 +1144,7 @@ export default function TransfersContent() {
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300/30 focus:border-indigo-400 outline-none"
                   >
                     <option value="">Select destination...</option>
-                    {locations
+                    {allSellerLocations
                       .filter((loc) => loc.id !== fromLocationId)
                       .map((loc) => (
                         <option key={loc.id} value={loc.id}>
@@ -1328,10 +1379,12 @@ export default function TransfersContent() {
               </button>
               <button
                 onClick={handleCreate}
-                disabled={creating || transferItems.some((i) => i.quantity > i.available_at_origin || i.available_at_origin === 0)}
+                disabled={creating || transferItems.some((i) => i.quantity > i.available_at_origin || i.available_at_origin === 0) || (isStaff && !!fromLocationId && !hasPermission(fromLocationId, 'transfers_create'))}
                 className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
               >
-                {creating ? "Creating..." : "Create Transfer"}
+                {isStaff && fromLocationId && !hasPermission(fromLocationId, 'transfers_create')
+                  ? "No Permission"
+                  : creating ? "Creating..." : "Create Transfer"}
               </button>
             </div>
           </div>

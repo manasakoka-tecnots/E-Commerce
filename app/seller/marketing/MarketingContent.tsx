@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 import Spinner from "@/src/components/Spinner";
 
 type Campaign = {
@@ -38,6 +39,7 @@ const formatRupee = (v: number) =>
   }).format(v);
 
 export default function MarketingContent() {
+  const { sellerId: staffSellerId } = useStaff();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -55,25 +57,29 @@ export default function MarketingContent() {
 
   const loadCampaigns = useCallback(async () => {
     setLoading(true);
-    const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) return;
+    let resolvedSellerId = staffSellerId;
+    if (!resolvedSellerId) {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) { setLoading(false); return; }
 
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("auth_uid", userData.user.id)
-      .maybeSingle();
-    if (!profile) {
-      setLoading(false);
-      return;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("auth_uid", userData.user.id)
+        .maybeSingle();
+      if (!profile) {
+        setLoading(false);
+        return;
+      }
+      const { data: seller } = await supabase
+        .from("sellers")
+        .select("id")
+        .eq("profile_id", profile.id)
+        .eq("status", "approved")
+        .maybeSingle();
+      resolvedSellerId = seller?.id ?? null;
     }
-    const { data: seller } = await supabase
-      .from("sellers")
-      .select("id")
-      .eq("profile_id", profile.id)
-      .eq("status", "approved")
-      .maybeSingle();
-    if (!seller) {
+    if (!resolvedSellerId) {
       setLoading(false);
       return;
     }
@@ -81,13 +87,13 @@ export default function MarketingContent() {
     const { data, error: fetchErr } = await supabase
       .from("marketing_campaigns")
       .select("*")
-      .eq("seller_id", seller.id)
+      .eq("seller_id", resolvedSellerId)
       .order("created_at", { ascending: false });
 
     if (fetchErr) setError(fetchErr.message);
     else setCampaigns(data ?? []);
     setLoading(false);
-  }, []);
+  }, [staffSellerId]);
 
   useEffect(() => {
     loadCampaigns();
@@ -99,30 +105,34 @@ export default function MarketingContent() {
     setError(null);
     setSuccess(null);
 
-    const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) {
-      setError("Not authenticated");
-      setSubmitting(false);
-      return;
-    }
+    let resolvedSellerId = staffSellerId;
+    if (!resolvedSellerId) {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) {
+        setError("Not authenticated");
+        setSubmitting(false);
+        return;
+      }
 
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("auth_uid", userData.user.id)
-      .maybeSingle();
-    if (!profile) {
-      setError("Profile not found");
-      setSubmitting(false);
-      return;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("auth_uid", userData.user.id)
+        .maybeSingle();
+      if (!profile) {
+        setError("Profile not found");
+        setSubmitting(false);
+        return;
+      }
+      const { data: seller } = await supabase
+        .from("sellers")
+        .select("id")
+        .eq("profile_id", profile.id)
+        .eq("status", "approved")
+        .maybeSingle();
+      resolvedSellerId = seller?.id ?? null;
     }
-    const { data: seller } = await supabase
-      .from("sellers")
-      .select("id")
-      .eq("profile_id", profile.id)
-      .eq("status", "approved")
-      .maybeSingle();
-    if (!seller) {
+    if (!resolvedSellerId) {
       setError("Seller profile not found");
       setSubmitting(false);
       return;
@@ -131,7 +141,7 @@ export default function MarketingContent() {
     const { error: insertErr } = await supabase
       .from("marketing_campaigns")
       .insert({
-        seller_id: seller.id,
+        seller_id: resolvedSellerId,
         name,
         type,
         channel,

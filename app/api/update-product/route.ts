@@ -9,9 +9,31 @@ function getUserSupabase(jwt: string) {
   );
 }
 
+// Whitelist of allowed product update fields
+const ALLOWED_PRODUCT_FIELDS = new Set([
+  "name", "slug", "description", "sku", "brand", "brand_id",
+  "category_id", "status", "is_active", "weight", "weight_unit",
+  "tags", "meta_title", "meta_description", "updated_at",
+]);
+
+// Whitelist of allowed listing update fields
+const ALLOWED_LISTING_FIELDS = new Set([
+  "price", "compare_at_price", "cost_price", "stock", "sku",
+  "is_active", "status", "condition", "updated_at",
+]);
+
+function filterFields(obj: Record<string, unknown>, allowed: Set<string>): Record<string, unknown> {
+  const filtered: Record<string, unknown> = {};
+  for (const key of Object.keys(obj)) {
+    if (allowed.has(key)) {
+      filtered[key] = obj[key];
+    }
+  }
+  return filtered;
+}
+
 export async function PUT(request: NextRequest) {
   try {
-    // Verify auth from the Authorization header
     const authHeader = request.headers.get("authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -28,15 +50,25 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Verify seller role
     const { data: profile } = await supabase
       .from("profiles")
       .select("id, role")
       .eq("auth_uid", user.id)
       .maybeSingle();
 
+    let isStaffMember = false;
     if (!profile || (profile.role !== "seller" && profile.role !== "admin")) {
-      return NextResponse.json({ error: "Not a seller" }, { status: 403 });
+      const { data: staffRecord } = await supabase
+        .from("seller_staff")
+        .select("id, seller_id, role")
+        .eq("profile_id", profile?.id ?? "")
+        .eq("status", "active")
+        .maybeSingle();
+
+      if (!staffRecord) {
+        return NextResponse.json({ error: "Not a seller" }, { status: 403 });
+      }
+      isStaffMember = true;
     }
 
     const body = await request.json();
@@ -46,16 +78,28 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Product ID required" }, { status: 400 });
     }
 
-    // Verify the seller owns this product (admins can update any product)
-    if (profile.role !== "admin") {
-      // Look up the seller record for this profile
+    if (profile!.role !== "admin") {
+      let resolvedSellerId: string | null = null;
+
       const { data: seller } = await supabase
         .from("sellers")
         .select("id")
-        .eq("profile_id", profile.id)
+        .eq("profile_id", profile!.id)
         .maybeSingle();
 
-      if (!seller) {
+      if (seller) {
+        resolvedSellerId = seller.id;
+      } else if (isStaffMember) {
+        const { data: staffRecord } = await supabase
+          .from("seller_staff")
+          .select("seller_id")
+          .eq("profile_id", profile!.id)
+          .eq("status", "active")
+          .maybeSingle();
+        resolvedSellerId = staffRecord?.seller_id ?? null;
+      }
+
+      if (!resolvedSellerId) {
         return NextResponse.json({ error: "Seller account not found" }, { status: 403 });
       }
 
@@ -69,16 +113,22 @@ export async function PUT(request: NextRequest) {
         return NextResponse.json({ error: "Product not found" }, { status: 404 });
       }
 
-      if (product.seller_id !== seller.id) {
+      if (product.seller_id !== resolvedSellerId) {
         return NextResponse.json({ error: "Not authorized to update this product" }, { status: 403 });
       }
     }
 
-    // Update product
+    // Update product — apply field whitelist
     if (updates && Object.keys(updates).length > 0) {
+      const safeUpdates = filterFields(updates, ALLOWED_PRODUCT_FIELDS);
+
+      if (Object.keys(safeUpdates).length === 0) {
+        return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
+      }
+
       const { data: updatedRows, error: updateError } = await supabase
         .from("products")
-        .update(updates)
+        .update(safeUpdates)
         .eq("id", productId)
         .select("id");
 
@@ -91,18 +141,20 @@ export async function PUT(request: NextRequest) {
 
       if (!updatedRows || updatedRows.length === 0) {
         return NextResponse.json(
-          { error: "Product update failed — no rows updated. This may be a permissions issue." },
+          { error: "Product update failed — no rows updated." },
           { status: 403 }
         );
       }
     }
 
-    // Update or create seller listing
+    // Update or create seller listing — apply field whitelist
     if (listingUpdates) {
+      const safeListingUpdates = filterFields(listingUpdates, ALLOWED_LISTING_FIELDS);
+
       if (listingId) {
         const { data: updatedListings, error: listingError } = await supabase
           .from("seller_listings")
-          .update(listingUpdates)
+          .update(safeListingUpdates)
           .eq("id", listingId)
           .select("id");
 
@@ -115,14 +167,14 @@ export async function PUT(request: NextRequest) {
 
         if (!updatedListings || updatedListings.length === 0) {
           return NextResponse.json(
-            { error: "Listing update failed — no rows updated. This may be a permissions issue." },
+            { error: "Listing update failed — no rows updated." },
             { status: 403 }
           );
         }
       } else if (sellerId) {
         const { data: newListing, error: listingError } = await supabase
           .from("seller_listings")
-          .insert({ ...listingUpdates, seller_id: sellerId, product_id: productId })
+          .insert({ ...safeListingUpdates, seller_id: sellerId, product_id: productId })
           .select("id")
           .single();
 

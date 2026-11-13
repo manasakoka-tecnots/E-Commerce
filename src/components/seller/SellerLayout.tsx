@@ -52,6 +52,7 @@ const sectionLabels: Record<string, string> = {
   payments: "Payments",
   shipping: "Shipping",
   notifications: "Notifications",
+  staff: "Staff",
   account: "Account",
 };
 
@@ -172,6 +173,7 @@ export default function SellerLayout({
   }, []);
 
   const handleSignOut = useCallback(async () => {
+    try { sessionStorage.removeItem("shopora_role_cache"); } catch { /* ignore */ }
     await supabase.auth.signOut();
     router.push("/auth/login");
   }, [router]);

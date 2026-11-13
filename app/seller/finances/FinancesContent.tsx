@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { supabase } from "@/src/lib/supabase/client";
 import Spinner from "@/src/components/Spinner";
+import { useStaff } from "@/src/context/StaffContext";
 
 const formatRupee = (value: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -31,6 +32,7 @@ type DailyData = {
 };
 
 export default function FinancesContent() {
+  const { sellerId: staffSellerId, isStaff, staffRole, isOwner } = useStaff();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,13 +88,12 @@ export default function FinancesContent() {
       return;
     }
 
-    const { data: seller } = await supabase
-      .from("sellers")
-      .select("id")
-      .eq("profile_id", profile.id)
-      .maybeSingle();
-
-    if (!seller) {
+    let resolvedSellerId = staffSellerId;
+    if (!resolvedSellerId) {
+      const { data: seller } = await supabase.from("sellers").select("id").eq("profile_id", profile.id).maybeSingle();
+      resolvedSellerId = seller?.id ?? null;
+    }
+    if (!resolvedSellerId) {
       setError("Seller account not found.");
       setLoading(false);
       return;
@@ -102,7 +103,7 @@ export default function FinancesContent() {
     const { data: listings } = await supabase
       .from("seller_listings")
       .select("id")
-      .eq("seller_id", seller.id);
+      .eq("seller_id", resolvedSellerId);
 
     if (!listings || listings.length === 0) {
       setLoading(false);
@@ -220,7 +221,7 @@ export default function FinancesContent() {
     const { data: payoutData } = await supabase
       .from("seller_payouts")
       .select("id, amount, status, method, reference, created_at")
-      .eq("seller_id", seller.id)
+      .eq("seller_id", resolvedSellerId)
       .order("created_at", { ascending: false })
       .limit(10);
 
@@ -238,11 +239,30 @@ export default function FinancesContent() {
     }
 
     setLoading(false);
-  }, []);
+  }, [staffSellerId]);
 
   useEffect(() => {
     void loadFinances();
   }, [loadFinances]);
+
+  // Staff permission check: only owners and admin staff can view finances
+  if (isStaff && !isOwner && staffRole !== "admin") {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="bg-white rounded-xl border border-red-200 p-8 text-center max-w-md">
+          <svg className="w-12 h-12 mx-auto text-red-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v.01M12 12a1.5 1.5 0 10-1.5-1.5" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.364 18.364A9 9 0 115.636 5.636a9 9 0 0112.728 12.728z" />
+          </svg>
+          <h2 className="text-sm font-bold text-gray-900">Access Restricted</h2>
+          <p className="text-xs text-gray-500 mt-1">Financial data is only available to store owners and admin staff.</p>
+          <a href="/seller/dashboard" className="inline-block mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700 transition">
+            Back to Dashboard
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   const netEarnings = totalEarned - totalCommission;
   const availableBalance = netEarnings - totalPaidOut;

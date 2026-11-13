@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 
 const PROCESSING_TIMES = [
   "1-2 business days",
@@ -12,6 +13,7 @@ const PROCESSING_TIMES = [
 ];
 
 export default function SettingsShippingContent() {
+  const { sellerId: staffSellerId } = useStaff();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -23,32 +25,44 @@ export default function SettingsShippingContent() {
 
   useEffect(() => {
     (async () => {
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) { setLoading(false); return; }
+      let resolvedSellerId = staffSellerId;
+      if (!resolvedSellerId) {
+        const { data: userData } = await supabase.auth.getUser();
+        if (!userData.user) { setLoading(false); return; }
 
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("auth_uid", userData.user.id)
-        .maybeSingle();
-      if (!profile) { setLoading(false); return; }
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("auth_uid", userData.user.id)
+          .maybeSingle();
+        if (!profile) { setLoading(false); return; }
 
-      const { data: seller } = await supabase
+        const { data: seller } = await supabase
+          .from("sellers")
+          .select("id")
+          .eq("profile_id", profile.id)
+          .maybeSingle();
+        resolvedSellerId = seller?.id ?? null;
+      }
+      if (!resolvedSellerId) { setLoading(false); return; }
+
+      setSellerId(resolvedSellerId);
+
+      const { data: sellerData } = await supabase
         .from("sellers")
-        .select("id, shipping_fee, free_shipping_threshold, processing_time")
-        .eq("profile_id", profile.id)
+        .select("shipping_fee, free_shipping_threshold, processing_time")
+        .eq("id", resolvedSellerId)
         .maybeSingle();
 
-      if (seller) {
-        setSellerId(seller.id);
-        if (seller.shipping_fee != null) setShippingFee(String(seller.shipping_fee));
-        if (seller.free_shipping_threshold != null)
-          setFreeShippingThreshold(String(seller.free_shipping_threshold));
-        if (seller.processing_time) setProcessingTime(seller.processing_time);
+      if (sellerData) {
+        if (sellerData.shipping_fee != null) setShippingFee(String(sellerData.shipping_fee));
+        if (sellerData.free_shipping_threshold != null)
+          setFreeShippingThreshold(String(sellerData.free_shipping_threshold));
+        if (sellerData.processing_time) setProcessingTime(sellerData.processing_time);
       }
       setLoading(false);
     })();
-  }, []);
+  }, [staffSellerId]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

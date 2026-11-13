@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { supabase } from "@/src/lib/supabase/client";
+import { useStaff } from "@/src/context/StaffContext";
 import Spinner from "@/src/components/Spinner";
 
 type Tab = "general" | "payments" | "shipping" | "notifications" | "account";
@@ -16,6 +17,8 @@ const TABS: { key: Tab; label: string }[] = [
 ];
 
 export default function SettingsContent() {
+  const { sellerId: staffSellerId, isOwner, staffRole } = useStaff();
+  const canEditSettings = isOwner || staffRole === 'admin';
   const [activeTab, setActiveTab] = useState<Tab>("general");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -69,10 +72,25 @@ export default function SettingsContent() {
       setLoading(false);
       return;
     }
+    let resolvedSellerId = staffSellerId;
+    if (!resolvedSellerId) {
+      const { data: sellerRow } = await supabase
+        .from("sellers")
+        .select("id")
+        .eq("profile_id", profile.id)
+        .maybeSingle();
+      resolvedSellerId = sellerRow?.id ?? null;
+    }
+
+    if (!resolvedSellerId) {
+      setLoading(false);
+      return;
+    }
+
     const { data: seller } = await supabase
       .from("sellers")
       .select("*")
-      .eq("profile_id", profile.id)
+      .eq("id", resolvedSellerId)
       .maybeSingle();
 
     if (seller) {
@@ -93,7 +111,7 @@ export default function SettingsContent() {
       setNotifyPayout(seller.notify_payout ?? true);
     }
     setLoading(false);
-  }, []);
+  }, [staffSellerId]);
 
   useEffect(() => {
     loadSettings();
@@ -267,6 +285,12 @@ export default function SettingsContent() {
             </div>
           )}
 
+          {!canEditSettings && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+              You are viewing settings as staff. Only the store owner or admin can make changes.
+            </div>
+          )}
+
           {/* Tabs */}
           <div className="flex gap-1 overflow-x-auto rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
             {TABS.map((t) => (
@@ -348,7 +372,7 @@ export default function SettingsContent() {
               <div className="mt-4 flex justify-end">
                 <button
                   onClick={handleSaveGeneral}
-                  disabled={saving}
+                  disabled={saving || !canEditSettings}
                   className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50"
                 >
                   {saving ? "Saving..." : "Save"}
@@ -408,7 +432,7 @@ export default function SettingsContent() {
               <div className="mt-4 flex justify-end">
                 <button
                   onClick={handleSavePayments}
-                  disabled={saving}
+                  disabled={saving || !canEditSettings}
                   className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50"
                 >
                   {saving ? "Saving..." : "Save"}
@@ -478,7 +502,7 @@ export default function SettingsContent() {
               <div className="mt-4 flex justify-end">
                 <button
                   onClick={handleSaveShipping}
-                  disabled={saving}
+                  disabled={saving || !canEditSettings}
                   className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50"
                 >
                   {saving ? "Saving..." : "Save"}
@@ -551,7 +575,7 @@ export default function SettingsContent() {
               <div className="mt-4 flex justify-end">
                 <button
                   onClick={handleSaveNotifications}
-                  disabled={saving}
+                  disabled={saving || !canEditSettings}
                   className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50"
                 >
                   {saving ? "Saving..." : "Save"}
@@ -638,7 +662,8 @@ export default function SettingsContent() {
                 </p>
                 <button
                   onClick={handleDeleteAccount}
-                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+                  disabled={!canEditSettings}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
                 >
                   Delete Account
                 </button>
