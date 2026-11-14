@@ -149,26 +149,8 @@ function getErrorMessage(error: unknown) {
   return "The marketplace catalog could not be loaded.";
 }
 
-/* ── Sale Price Tag SVG ── */
-function SaleTag({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
-      <path d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58.55 0 1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41 0-.55-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z" />
-    </svg>
-  );
-}
-
-/* ── Lightning bolt SVG ── */
-function Lightning({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
-      <path d="M7 2v11h3v9l7-12h-4l4-8z" />
-    </svg>
-  );
-}
-
-/* ── 11:11 Mega Sale Countdown Timer ── */
-const SALE_END = new Date("2026-11-12T00:00:00+05:30").getTime(); // 11:11 sale ends midnight
+/* ── Winter Sale Countdown Timer ── */
+const SALE_END = new Date("2027-02-28T23:59:59+05:30").getTime(); // Winter sale ends Feb 28
 
 function SaleCountdown({ compact = false }: { compact?: boolean }) {
   const [timeLeft, setTimeLeft] = useState<{
@@ -192,7 +174,7 @@ function SaleCountdown({ compact = false }: { compact?: boolean }) {
     return () => clearInterval(id);
   }, []);
 
-  if (expired) return <span className={`font-bold ${compact ? "text-xs text-rose-200" : "text-base text-rose-300"}`}>Sale Ended</span>;
+  if (expired) return <span className={`font-bold ${compact ? "text-xs text-sky-200" : "text-base text-sky-300"}`}>Sale Ended</span>;
   if (!timeLeft) return null;
 
   const units = [
@@ -207,8 +189,8 @@ function SaleCountdown({ compact = false }: { compact?: boolean }) {
       <div className="flex items-center gap-1.5">
         {units.map((u) => (
           <div key={u.label} className="flex flex-col items-center rounded-md bg-black/40 px-1.5 py-0.5 backdrop-blur">
-            <span className="text-xs font-bold tabular-nums leading-tight text-rose-300">{String(u.value).padStart(2, "0")}</span>
-            <span className="text-[8px] uppercase tracking-wider text-rose-100/70">{u.label}</span>
+            <span className="text-xs font-bold tabular-nums leading-tight text-sky-300">{String(u.value).padStart(2, "0")}</span>
+            <span className="text-[8px] uppercase tracking-wider text-sky-100/70">{u.label}</span>
           </div>
         ))}
       </div>
@@ -219,41 +201,50 @@ function SaleCountdown({ compact = false }: { compact?: boolean }) {
     <div className="flex items-center gap-2 sm:gap-3">
       {units.map((u, i) => (
         <div key={u.label} className="flex items-center gap-2 sm:gap-3">
-          <div className="flex flex-col items-center rounded-xl bg-black/50 px-3 py-2 sm:px-4 sm:py-3 backdrop-blur" style={{ boxShadow: "0 0 16px rgba(239,68,68,0.3)" }}>
-            <span className="text-2xl font-extrabold tabular-nums leading-none text-rose-400 sm:text-3xl" style={{ textShadow: "0 0 12px rgba(239,68,68,0.6)" }}>{String(u.value).padStart(2, "0")}</span>
-            <span className="mt-1 text-[10px] font-semibold uppercase tracking-widest text-rose-200/80">{u.label}</span>
+          <div className="flex flex-col items-center rounded-xl bg-black/50 px-3 py-2 sm:px-4 sm:py-3 backdrop-blur" style={{ boxShadow: "0 0 16px rgba(56,189,248,0.3)" }}>
+            <span className="text-2xl font-extrabold tabular-nums leading-none text-sky-400 sm:text-3xl" style={{ textShadow: "0 0 12px rgba(56,189,248,0.6)" }}>{String(u.value).padStart(2, "0")}</span>
+            <span className="mt-1 text-[10px] font-semibold uppercase tracking-widest text-sky-200/80">{u.label}</span>
           </div>
-          {i < units.length - 1 && <span className="text-xl font-bold text-rose-400/60 sm:text-2xl">:</span>}
+          {i < units.length - 1 && <span className="text-xl font-bold text-sky-400/60 sm:text-2xl">:</span>}
         </div>
       ))}
     </div>
   );
 }
 
-/* ── 11:11 Mega Sale Banner ── */
+/* ── Snowflake SVG ── */
+function Snowflake({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M12 2v4m0 12v4m-6.93-2.93l2.83-2.83m8.2-8.2l2.83-2.83M2 12h4m12 0h4M4.93 4.93l2.83 2.83m8.2 8.2l2.83 2.83M12 8a4 4 0 100 8 4 4 0 000-8z" />
+    </svg>
+  );
+}
+
+/* ── Winter Sale Banner ── */
 function SaleBanner() {
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
   return (
-    <div className="relative overflow-hidden bg-gradient-to-r from-red-950 via-rose-900 to-red-950 text-white">
-      <div className="sale-gradient-slide absolute inset-0 opacity-15" />
+    <div className="relative overflow-hidden bg-gradient-to-r from-slate-900 via-sky-900 to-slate-900 text-white">
+      <div className="winter-gradient-slide absolute inset-0 opacity-15" />
       <div className="relative mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6 lg:px-8">
         <div className="flex items-center gap-3">
-          <Lightning className="h-6 w-6 shrink-0 text-yellow-400" />
+          <Snowflake className="h-6 w-6 shrink-0 text-sky-300" />
           <div className="flex items-center gap-2 text-sm font-semibold">
-            <span className="hidden sm:inline font-extrabold text-yellow-300 text-base tracking-wider">11:11</span>
-            <span>MEGA SALE IS LIVE</span>
+            <span className="hidden sm:inline font-extrabold text-sky-300 text-base tracking-wider">WINTER SALE</span>
+            <span>CHILL DEALS ARE LIVE</span>
             <span className="hidden sm:inline">—</span>
-            <span className="hidden sm:inline text-rose-200">Up to 80% off everything!</span>
-            <span className="inline sm:hidden text-rose-200">Up to 80% off!</span>
+            <span className="hidden sm:inline text-sky-200">Up to 70% off winter essentials!</span>
+            <span className="inline sm:hidden text-sky-200">Up to 70% off!</span>
           </div>
-          <Lightning className="hidden h-6 w-6 shrink-0 text-yellow-400 sm:block" />
+          <Snowflake className="hidden h-6 w-6 shrink-0 text-sky-300 sm:block" />
         </div>
         <div className="flex items-center gap-3">
           <div className="hidden sm:block">
             <SaleCountdown compact />
           </div>
-          <Link href="/products" className="shrink-0 rounded-full bg-yellow-500 px-4 py-1.5 text-xs font-bold text-red-950 transition hover:bg-yellow-400">
+          <Link href="/products" className="shrink-0 rounded-full bg-sky-400 px-4 py-1.5 text-xs font-bold text-slate-950 transition hover:bg-sky-300">
             Shop Now
           </Link>
           <button onClick={() => setDismissed(true)} className="shrink-0 rounded-full p-1 text-white/70 transition hover:bg-white/20 hover:text-white" aria-label="Dismiss banner">
@@ -410,12 +401,12 @@ export default function AppContent() {
       <SaleBanner />
 
       <main className="relative isolate flex-1 overflow-x-clip">
-        {/* ── Floating Sale Decorations ── */}
+        {/* ── Floating Winter Decorations ── */}
         <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
-          <SaleTag className="sale-float absolute left-[3%] top-[20%] h-6 w-6 text-red-400/40" />
-          <Lightning className="sale-float-delay-1 absolute right-[4%] top-[35%] h-5 w-5 text-yellow-400/30" />
-          <SaleTag className="sale-float-delay-2 absolute left-[6%] top-[60%] h-5 w-5 text-red-500/30" />
-          <Lightning className="sale-float absolute right-[5%] top-[75%] h-4 w-4 text-yellow-500/25" />
+          <Snowflake className="sale-float absolute left-[3%] top-[20%] h-6 w-6 text-sky-400/30" />
+          <Snowflake className="sale-float-delay-1 absolute right-[4%] top-[35%] h-5 w-5 text-sky-300/25" />
+          <Snowflake className="sale-float-delay-2 absolute left-[6%] top-[60%] h-5 w-5 text-sky-400/20" />
+          <Snowflake className="sale-float absolute right-[5%] top-[75%] h-4 w-4 text-sky-300/20" />
         </div>
         <div
           aria-hidden="true"
@@ -599,7 +590,7 @@ export default function AppContent() {
             <div className="relative z-10 grid items-center gap-10 lg:grid-cols-[1.05fr_0.95fr]">
               <div className="max-w-2xl">
                 <p className="mb-5 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.24em] text-teal-900">
-                  <span className="inline-block rounded-full bg-gradient-to-r from-red-600 to-yellow-500 px-3 py-1 text-[10px] font-bold tracking-wider text-white">11:11 SALE</span>
+                  <span className="inline-block rounded-full bg-gradient-to-r from-sky-600 to-cyan-400 px-3 py-1 text-[10px] font-bold tracking-wider text-white">WINTER SALE</span>
                   A marketplace for everyday discoveries
                 </p>
                 <h1 className="max-w-xl text-4xl font-semibold leading-[1.08] tracking-tight sm:text-5xl lg:text-6xl">
@@ -860,31 +851,31 @@ export default function AppContent() {
           </div>
         </section>
 
-        {/* ── 11:11 Mega Deals Section ── */}
+        {/* ── Winter Sale Deals Section ── */}
         {!loading && topDeals.length > 0 && (
           <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-red-950 via-rose-900 to-red-950 p-8 sm:p-10">
-              {/* Decorative grid pattern */}
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-sky-950 to-slate-900 p-8 sm:p-10">
+              {/* Decorative snowflake pattern */}
               <div className="pointer-events-none absolute inset-0 opacity-10">
-                <div className="absolute inset-0" style={{ backgroundImage: "linear-gradient(rgba(234,179,8,0.2) 1px, transparent 1px), linear-gradient(90deg, rgba(234,179,8,0.2) 1px, transparent 1px)", backgroundSize: "40px 40px" }} />
+                <div className="absolute inset-0" style={{ backgroundImage: "radial-gradient(circle, rgba(186,230,253,0.3) 1px, transparent 1px)", backgroundSize: "32px 32px" }} />
               </div>
-              {/* Floating sale elements */}
+              {/* Floating winter elements */}
               <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-                <SaleTag className="sale-float absolute left-[5%] top-[10%] h-8 w-8 text-yellow-400/40" />
-                <Lightning className="sale-float-delay-1 absolute right-[8%] top-[15%] h-7 w-7 text-rose-400/40" />
-                <SaleTag className="sale-float-delay-2 absolute left-[50%] top-[8%] h-6 w-6 text-yellow-300/30" />
+                <Snowflake className="sale-float absolute left-[5%] top-[10%] h-8 w-8 text-sky-400/30" />
+                <Snowflake className="sale-float-delay-1 absolute right-[8%] top-[15%] h-7 w-7 text-sky-300/30" />
+                <Snowflake className="sale-float-delay-2 absolute left-[50%] top-[8%] h-6 w-6 text-cyan-300/25" />
               </div>
               <div className="relative z-10">
                 <div className="mb-8 text-center">
                   <div className="mb-3 flex items-center justify-center gap-3">
-                    <Lightning className="h-8 w-8 text-yellow-400" />
+                    <Snowflake className="h-8 w-8 text-sky-300" />
                     <h2 className="text-3xl font-bold text-white sm:text-4xl">
-                      <span className="text-yellow-400">11:11</span> Mega Deals
+                      Winter <span className="text-sky-400">Sale</span> Deals
                     </h2>
-                    <Lightning className="h-8 w-8 text-yellow-400" />
+                    <Snowflake className="h-8 w-8 text-sky-300" />
                   </div>
-                  <p className="text-rose-200/80">
-                    Biggest sale of the season — grab it before it&apos;s gone!
+                  <p className="text-sky-200/80">
+                    Cozy up with the biggest discounts of the season!
                   </p>
                   {/* Countdown timer */}
                   <div className="mt-5 flex justify-center">
@@ -892,14 +883,14 @@ export default function AppContent() {
                   </div>
                   {/* Sale badges */}
                   <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-                    <span className="sale-neon-glow inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-red-600 to-yellow-500 px-4 py-1.5 text-sm font-bold text-white">
-                      ⚡ 11:11 Special
+                    <span className="winter-glow inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-sky-600 to-cyan-400 px-4 py-1.5 text-sm font-bold text-white">
+                      Winter Special
                     </span>
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold text-rose-100 backdrop-blur">
-                      Up to 80% Off
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold text-sky-100 backdrop-blur">
+                      Up to 70% Off
                     </span>
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold text-rose-100 backdrop-blur">
-                      🚚 Free Delivery
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold text-sky-100 backdrop-blur">
+                      Free Delivery
                     </span>
                   </div>
                 </div>
@@ -912,8 +903,8 @@ export default function AppContent() {
                       className="group relative overflow-hidden rounded-2xl bg-white/95 p-3 shadow-lg backdrop-blur transition duration-300 hover:-translate-y-1 hover:shadow-xl"
                     >
                       <div className="absolute right-2 top-2 z-10">
-                        <span className="sale-neon-glow inline-block rounded-full bg-gradient-to-r from-red-600 to-yellow-500 px-2.5 py-1 text-[10px] font-bold text-white">
-                          11:11 DEAL
+                        <span className="winter-glow inline-block rounded-full bg-gradient-to-r from-sky-600 to-cyan-400 px-2.5 py-1 text-[10px] font-bold text-white">
+                          WINTER DEAL
                         </span>
                       </div>
                       <div className="relative aspect-square overflow-hidden rounded-xl bg-[#f8f6f0]">
@@ -928,7 +919,7 @@ export default function AppContent() {
                         </p>
                         {product.price != null && (
                           <div className="mt-1.5 flex items-baseline gap-2">
-                            <span className="text-base font-bold text-red-700">
+                            <span className="text-base font-bold text-sky-700">
                               ₹{product.price.toLocaleString("en-IN")}
                             </span>
                             {product.referencePrice != null && product.referencePrice > product.price && (
@@ -950,7 +941,7 @@ export default function AppContent() {
                 <div className="mt-6 text-center">
                   <Link
                     href="/products"
-                    className="inline-flex items-center gap-2 rounded-full bg-yellow-500 px-6 py-3 text-sm font-bold text-red-950 transition hover:bg-yellow-400"
+                    className="inline-flex items-center gap-2 rounded-full bg-sky-400 px-6 py-3 text-sm font-bold text-slate-950 transition hover:bg-sky-300"
                   >
                     View All Deals
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>

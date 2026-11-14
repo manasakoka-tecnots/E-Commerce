@@ -70,10 +70,10 @@ select {
   }
 }
 
-/* ── 11:11 Mega Sale Animations ── */
-@keyframes neon-pulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(234, 179, 8, 0.4), 0 0 16px rgba(239, 68, 68, 0.2); }
-  50% { box-shadow: 0 0 16px rgba(234, 179, 8, 0.7), 0 0 32px rgba(239, 68, 68, 0.4), 0 0 48px rgba(234, 179, 8, 0.2); }
+/* ── Winter Sale Animations ── */
+@keyframes winter-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(56, 189, 248, 0.4), 0 0 16px rgba(6, 182, 212, 0.2); }
+  50% { box-shadow: 0 0 16px rgba(56, 189, 248, 0.7), 0 0 32px rgba(6, 182, 212, 0.4), 0 0 48px rgba(56, 189, 248, 0.2); }
 }
 
 @keyframes slide-gradient {
@@ -86,17 +86,9 @@ select {
   50% { transform: translateY(-12px) rotate(5deg); opacity: 0.9; }
 }
 
-@keyframes cyber-glitch {
-  0%, 100% { transform: translate(0); }
-  20% { transform: translate(-2px, 1px); }
-  40% { transform: translate(2px, -1px); }
-  60% { transform: translate(-1px, -1px); }
-  80% { transform: translate(1px, 1px); }
-}
-
-.sale-neon-glow { animation: neon-pulse 2s ease-in-out infinite; }
-.sale-gradient-slide {
-  background: linear-gradient(90deg, #dc2626, #eab308, #f43f5e, #dc2626);
+.winter-glow { animation: winter-pulse 2s ease-in-out infinite; }
+.winter-gradient-slide {
+  background: linear-gradient(90deg, #0c4a6e, #38bdf8, #06b6d4, #0c4a6e);
   background-size: 200% 100%;
   animation: slide-gradient 3s linear infinite;
 }
