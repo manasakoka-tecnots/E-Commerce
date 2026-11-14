@@ -19,6 +19,7 @@ type OrderRow = {
   items_count: number;
   seller_total: number;
   fulfillment_status: "unfulfilled" | "partially_fulfilled" | "fulfilled";
+  location_name: string | null;
 };
 
 const STATUS_TABS = [
@@ -232,6 +233,40 @@ export default function OrdersContent() {
       .eq("seller_id", resolvedSellerId)
       .in("order_id", orderIds);
 
+    // Fetch all seller locations for name lookup
+    const { data: sellerLocations } = await supabase
+      .from("seller_locations")
+      .select("id, name")
+      .eq("seller_id", resolvedSellerId);
+    const locationNameMap = new Map<string, string>();
+    for (const loc of sellerLocations || []) {
+      locationNameMap.set(loc.id, loc.name);
+    }
+
+    // For unfulfilled orders, get committed location from inventory_adjustments
+    const { data: adjustmentData } = await supabase
+      .from("inventory_adjustments")
+      .select("reference_id, location_id")
+      .eq("adjustment_type", "order_committed")
+      .in("reference_id", orderIds);
+
+    // Build order → location mapping
+    const orderLocationMap = new Map<string, string>();
+    // First, from inventory adjustments (stock commit at order placement)
+    for (const adj of adjustmentData || []) {
+      if (adj.reference_id && adj.location_id && !orderLocationMap.has(adj.reference_id)) {
+        const name = locationNameMap.get(adj.location_id);
+        if (name) orderLocationMap.set(adj.reference_id, name);
+      }
+    }
+    // Override with fulfillment location (more accurate for fulfilled orders)
+    for (const f of fulfillmentData || []) {
+      if (f.location_id && f.status !== "cancelled") {
+        const name = locationNameMap.get(f.location_id);
+        if (name) orderLocationMap.set(f.order_id, name);
+      }
+    }
+
     // Staff location filtering: only show orders with fulfillments at staff's assigned locations
     // or unfulfilled orders (which staff at any location can potentially fulfill)
     let staffVisibleOrderIds: Set<string> | null = null;
@@ -315,6 +350,7 @@ export default function OrdersContent() {
       items_count: o.items_count,
       seller_total: o.seller_total,
       fulfillment_status: fulfillmentStatusMap.get(o.order_id) || "unfulfilled",
+      location_name: orderLocationMap.get(o.order_id) || null,
     }));
 
     // Sort by date descending
@@ -569,6 +605,7 @@ export default function OrdersContent() {
                           <th className="py-3 px-4">Date</th>
                           <th className="py-3 px-4">Items</th>
                           <th className="py-3 px-4">Total</th>
+                          <th className="py-3 px-4">Location</th>
                           <th className="py-3 px-4">Status</th>
                           <th className="py-3 px-4">Fulfillment</th>
                           <th className="py-3 px-4 text-right">Actions</th>
@@ -605,6 +642,19 @@ export default function OrdersContent() {
                             </td>
                             <td className="py-3.5 px-4 font-extrabold text-gray-900">
                               {formatRupee(order.seller_total)}
+                            </td>
+                            <td className="py-3.5 px-4">
+                              {order.location_name ? (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                                  <svg className="h-3 w-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                  </svg>
+                                  {order.location_name}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 text-[10px]">—</span>
+                              )}
                             </td>
                             <td className="py-3.5 px-4">
                               <span

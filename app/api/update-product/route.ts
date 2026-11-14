@@ -57,6 +57,7 @@ export async function PUT(request: NextRequest) {
       .maybeSingle();
 
     let isStaffMember = false;
+    let staffRole: string | null = null;
     if (!profile || (profile.role !== "seller" && profile.role !== "admin")) {
       const { data: staffRecord } = await supabase
         .from("seller_staff")
@@ -69,6 +70,24 @@ export async function PUT(request: NextRequest) {
         return NextResponse.json({ error: "Not a seller" }, { status: 403 });
       }
       isStaffMember = true;
+      staffRole = staffRecord.role;
+
+      // Associates need explicit inventory_manage or products_manage permission
+      if (staffRole === "associate") {
+        const svc = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!
+        );
+        const { data: assignments } = await svc
+          .from("staff_location_assignments")
+          .select("permissions")
+          .eq("staff_id", staffRecord.id);
+
+        const allPerms = (assignments || []).flatMap(a => a.permissions || []);
+        if (!allPerms.includes("inventory_manage") && !allPerms.includes("products_manage")) {
+          return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+        }
+      }
     }
 
     const body = await request.json();

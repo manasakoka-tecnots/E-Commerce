@@ -134,6 +134,7 @@ export function StaffProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    let activeController: AbortController | null = null;
 
     function applyRoleData(roleData: Record<string, unknown>) {
       if (cancelled) return;
@@ -180,20 +181,28 @@ export function StaffProvider({ children }: { children: React.ReactNode }) {
       if (!cancelled) setLoading(false);
     }
 
-    async function fetchAndApply() {
+    async function fetchAndApply(signal: AbortSignal) {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token || cancelled) {
         if (!cancelled) setLoading(false);
         return;
       }
-      const res = await fetch("/api/auth/detect-role", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
-      if (!res.ok) {
+      let res: Response | null = null;
+      try {
+        res = await fetch("/api/auth/detect-role", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          signal,
+        });
+      } catch {
+        // Network error or abort — silently ignore
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      if (!res || !res.ok) {
         if (!cancelled) setLoading(false);
         return;
       }
@@ -207,28 +216,35 @@ export function StaffProvider({ children }: { children: React.ReactNode }) {
       applyRoleData(roleData);
     }
 
-    async function load() {
-      try {
-        // 1. Try cache first — instant, no network round-trip
-        try {
-          const raw = sessionStorage.getItem("shopora_role_cache");
-          if (raw) {
-            const cache = JSON.parse(raw);
-            if (Date.now() - cache.cachedAt < 5 * 60 * 1000) {
-              applyRoleData(cache);
-              // Re-validate in background
-              fetchAndApply();
-              return;
-            }
-          }
-        } catch { /* ignore */ }
+    function load() {
+      // Abort any previous in-flight request
+      if (activeController) activeController.abort();
+      const controller = new AbortController();
+      activeController = controller;
 
-        // 2. No cache — fetch from API
-        await fetchAndApply();
-      } catch (err) {
-        console.error("StaffContext load error:", err);
-        if (!cancelled) setLoading(false);
-      }
+      (async () => {
+        try {
+          // 1. Try cache first — instant, no network round-trip
+          try {
+            const raw = sessionStorage.getItem("shopora_role_cache");
+            if (raw) {
+              const cache = JSON.parse(raw);
+              if (Date.now() - cache.cachedAt < 5 * 60 * 1000) {
+                applyRoleData(cache);
+                // Re-validate in background (ignore errors — it's best-effort)
+                fetchAndApply(controller.signal).catch(() => {});
+                return;
+              }
+            }
+          } catch { /* ignore */ }
+
+          // 2. No cache — fetch from API
+          await fetchAndApply(controller.signal);
+        } catch {
+          // Silently ignore all errors (abort, network, etc.)
+          if (!cancelled) setLoading(false);
+        }
+      })();
     }
 
     load();
@@ -245,6 +261,7 @@ export function StaffProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       cancelled = true;
+      if (activeController) activeController.abort();
       subscription.unsubscribe();
     };
   }, []);

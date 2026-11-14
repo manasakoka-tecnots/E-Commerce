@@ -9,7 +9,10 @@ import { StaffProvider } from "@/src/context/StaffContext";
 import StaffRouteGuard from "@/src/components/seller/StaffRouteGuard";
 
 // Routes that don't require seller auth (rendered without sidebar)
-const PUBLIC_SELLER_ROUTES = ["/seller/register", "/seller/staff-invite"];
+// Routes that render without seller auth — prefix-matched (route + "/..." also allowed)
+const PUBLIC_SELLER_ROUTES = ["/seller/register", "/seller/staff-invite", "/seller/login"];
+// Routes that are public only as an exact match (no prefix matching)
+const PUBLIC_SELLER_EXACT = ["/seller"];
 
 // Cache TTL: 5 minutes — avoids re-fetching on every page navigation
 const ROLE_CACHE_TTL = 5 * 60 * 1000;
@@ -71,9 +74,11 @@ export default function SellerAuthWrapper({
   const [sellerInitials, setSellerInitials] = useState("S");
   const checkedRef = useRef(false);
 
-  const isPublicRoute = PUBLIC_SELLER_ROUTES.some(
-    (route) => pathname === route || pathname?.startsWith(route + "/")
-  );
+  const isPublicRoute =
+    PUBLIC_SELLER_EXACT.includes(pathname) ||
+    PUBLIC_SELLER_ROUTES.some(
+      (route) => pathname === route || pathname?.startsWith(route + "/")
+    );
 
   useEffect(() => {
     if (isPublicRoute) {

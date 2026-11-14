@@ -19,6 +19,7 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirect") ?? "";
+  const roleHint = searchParams.get("role") ?? "";
   const verified = searchParams.get("verified") === "true";
   const errorParam = searchParams.get("error") ?? "";
   const [errorMsg, setErrorMsg] = useState(errorParam);
@@ -53,15 +54,8 @@ function LoginForm() {
       return;
     }
 
-    // If there's a specific redirect (e.g., from invite page), go there directly
-    if (redirectTo) {
-      router.replace(redirectTo);
-      setLoading(false);
-      return;
-    }
-
-    // Detect role using server-side API (bypasses all RLS issues)
-    // Retry up to 2 times if the API fails (transient DB errors, timeouts)
+    // Always detect role first — this caches it for SellerAuthWrapper and StaffContext
+    // so they don't need another API call on first load.
     let roleData: Record<string, unknown> | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -80,19 +74,32 @@ function LoginForm() {
       } catch (err) {
         console.warn(`[Login] detect-role attempt ${attempt + 1} error:`, err);
       }
-      // Brief pause before retry
       if (attempt < 1) await new Promise(r => setTimeout(r, 1000));
     }
 
     if (roleData) {
-      // Cache role data so SellerAuthWrapper and StaffContext don't need
-      // another round-trip — they can read it instantly on first load.
+      // Cache role data for SellerAuthWrapper and StaffContext
       try {
         sessionStorage.setItem("shopora_role_cache", JSON.stringify({
           ...roleData,
           cachedAt: Date.now(),
         }));
       } catch { /* sessionStorage unavailable in some contexts */ }
+
+      // If there's a redirect (e.g., from invite page or seller/staff login),
+      // go there — but only if the user's role actually matches
+      if (redirectTo) {
+        const isSeller = roleData.role === "seller" || roleData.role === "staff" || roleData.role === "admin";
+        const isSellerRoute = redirectTo.startsWith("/seller");
+        if (isSellerRoute && !isSeller) {
+          setErrorMsg("You don't have access to the seller portal. Please contact the seller who invited you.");
+          setLoading(false);
+          return;
+        }
+        router.replace(redirectTo);
+        setLoading(false);
+        return;
+      }
 
       if (roleData.role === "admin") {
         router.replace("/admin/dashboard");
@@ -108,7 +115,6 @@ function LoginForm() {
         return;
       }
     } else {
-      // detect-role failed after retries — don't silently redirect to customer
       console.error("[Login] detect-role failed after retries");
       setErrorMsg("Unable to detect your account type. Please try logging in again.");
       setLoading(false);
@@ -167,12 +173,21 @@ function LoginForm() {
             </Link>
           </div>
 
+          {roleHint === "staff" && (
+            <div className="rounded-lg bg-teal-50 border border-teal-200 px-4 py-3">
+              <p className="text-sm font-medium text-teal-800">Staff Login</p>
+              <p className="text-xs text-teal-600 mt-0.5">Sign in with the email and password from your staff invite.</p>
+            </div>
+          )}
+
           <div>
             <h2 className="text-xl font-bold text-slate-900">
-              Login <span className="text-sm font-normal text-slate-500">or</span> Signup
+              {roleHint === "staff" ? "Staff Sign In" : (<>Login <span className="text-sm font-normal text-slate-500">or</span> Signup</>)}
             </h2>
             <p className="mt-1 text-sm text-slate-400">
-              Get access to your Orders, Wishlist and Recommendations
+              {roleHint === "staff"
+                ? "Enter your credentials to access the seller dashboard"
+                : "Get access to your Orders, Wishlist and Recommendations"}
             </p>
           </div>
 
@@ -266,9 +281,15 @@ function LoginForm() {
           </Link>
 
           <p className="text-center text-xs text-slate-400">
-            <Link href="/" className="hover:text-[#ff3f6c] transition">
-              &larr; Back to home
-            </Link>
+            {redirectTo?.startsWith("/seller") ? (
+              <Link href="/seller" className="hover:text-teal-600 transition">
+                &larr; Back to Seller Central
+              </Link>
+            ) : (
+              <Link href="/" className="hover:text-[#ff3f6c] transition">
+                &larr; Back to home
+              </Link>
+            )}
           </p>
         </div>
       </div>

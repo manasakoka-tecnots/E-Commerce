@@ -97,6 +97,12 @@ export async function POST(req: NextRequest) {
         .select("location_id, permissions")
         .eq("staff_id", staffRecord.id);
 
+      // Update last_login_at for this staff member
+      await svc
+        .from("seller_staff")
+        .update({ last_login_at: new Date().toISOString() })
+        .eq("id", staffRecord.id);
+
       return NextResponse.json({
         role: "staff",
         profileId: profile.id,
